@@ -1,0 +1,185 @@
+---
+title: "Untitled"
+author: "author"
+date: '2019 10 14 '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r install}
+install.packages('reshape')
+```
+
+```{r}
+library(stringr)
+library(reshape)
+library(psych)
+```
+
+# 거주인구 데이터 반출가능
+- 생활인구 데이터는 반출 안되고, 분석후 결과 승인나서, 분석결과 받을 때 까지 3일 정도 소요
+- 거주인구 데이터, 반출신청해서, 받은 데이터로 geoju_201908.csv 클리닝 한거
+
+```{r}
+geoju_df = read.csv('../../SeoulBigDataCampus_Competition2019_Submission_data/GeoJuInGu/geoju_201908.csv', fileEncoding = 'UTF-8-BOM')
+head(geoju_df)
+
+# geoju_df$ADMI_CD = as.character(geoju_df$ADMI_CD)
+# geoju_df$ADMI_NM
+# geoju_df$SEXDSTN_CD
+# geoju_df$AGRDE_CD
+# geoju_df$RSPOP_CNT
+# geoju_df$CTY_NM
+
+geoju_df %>% 
+  select(ADMI_CD, SEXDSTN_CD, AGRDE_CD, RSPOP_CNT) ->
+  geoju2_df
+
+geoju2_df$ADMI_CD = as.character(geoju2_df$ADMI_CD)
+geoju2_df$SEXDSTN_CD = as.character(geoju2_df$SEXDSTN_CD)
+geoju2_df$AGRDE_CD = as.character(geoju2_df$AGRDE_CD)
+geoju2_df$RSPOP_CNT = as.numeric(geoju2_df$RSPOP_CNT)
+
+geoju2_df$SEXDSTN_CD = str_replace(geoju2_df$SEXDSTN_CD, '1', 'M')
+geoju2_df$SEXDSTN_CD = str_replace(geoju2_df$SEXDSTN_CD, '2', 'F')
+
+head(geoju2_df)
+
+unique(geoju2_df$AGRDE_CD)
+
+geoju2_df %>% 
+  filter(AGRDE_CD == '2024' | 
+           AGRDE_CD == '2529' | 
+           AGRDE_CD == '3034' | 
+           AGRDE_CD == '3539' | 
+           AGRDE_CD == '4044' | 
+           AGRDE_CD == '4549') ->
+  geoju3_df
+
+head(geoju3_df)
+
+geoju_df = data.frame(geoju3_df)
+
+geoju_df$ADMI_CD = as.character(geoju_df$ADMI_CD)
+geoju_df$SEXDSTN_CD = as.character(geoju_df$SEXDSTN_CD)
+geoju_df$AGRDE_CD = as.character(geoju_df$AGRDE_CD)
+
+# 아래와 같은 형태로 변경해야 함
+# EMD_CD
+# F_20_24
+# F_25_29
+# F_30_34
+# F_35_39
+# F_40_44
+# F_45_49
+# M_20_24
+# M_25_29
+# M_30_34
+# M_35_39
+# M_40_44
+# M_45_49
+
+# geoju_df$AGRDE_CD = substr(geoju_df$AGRDE_CD, )
+geoju_df$X_XX_XX = paste0(geoju_df$SEXDSTN_CD,
+                          '_',
+                          substr(geoju_df$AGRDE_CD, 1, 2), 
+                          '_', 
+                          substr(geoju_df$AGRDE_CD, 3, 4))
+
+geoju_df %>% 
+  select(ADMI_CD, X_XX_XX, RSPOP_CNT) ->
+  geoju2_df
+
+head(geoju2_df)
+
+geoju3_df = geoju2_df[with(geoju2_df, order(ADMI_CD)), ]
+head(geoju3_df)
+
+write.csv(geoju3_df, 'geoju3_201908.csv', fileEncoding = 'UTF-8', row.names = FALSE)
+```
+
+- 연령대, 성별이 row에 있음, pivot해서, column으로 변경함
+
+```{r}
+geoju_df = read.csv('geoju3_201908.csv', fileEncoding = 'UTF-8')
+
+geoju_df$ADMI_CD = as.character(geoju_df$ADMI_CD)
+geoju_df$X_XX_XX = as.character(geoju_df$X_XX_XX)
+geoju_df$RSPOP_CNT = as.numeric(geoju_df$RSPOP_CNT)
+
+head(geoju_df)
+
+write_df = cast(geoju_df, ADMI_CD ~ X_XX_XX)
+
+head(write_df)
+
+write.csv(write_df, 'cleaned_geoju_201908.csv', fileEncoding = 'UTF-8', row.names = FALSE)
+```
+
+# 행정동 기준 데이터를 법정동 기준 데이터로 변환
+
+```{r}
+hjd2bjd_df = read.csv('../06_BeobJeongDong_HaengJeongDong/cleaned_seoul_hjd2bjd.csv', fileEncoding = 'UTF-8')
+hjd2bjd_df$hjd_code = as.character(hjd2bjd_df$hjd_code)
+hjd2bjd_df$bjd_code = as.character(hjd2bjd_df$bjd_code)
+head(hjd2bjd_df)
+
+pop_df = read.csv('cleaned_geoju_201908.csv', fileEncoding = 'UTF-8')
+pop_df$ADMI_CD = as.character(pop_df$ADMI_CD)
+pop_df$ADMI_CD = paste0(pop_df$ADMI_CD, '00')
+head(pop_df)
+
+all_df = merge(hjd2bjd_df, pop_df, by.x = 'hjd_code', by.y = 'ADMI_CD')
+head(all_df)
+describe(all_df)
+sum(duplicated(all_df$bjd_code))
+```
+
+```{r}
+all_df$F_20_24_r = all_df$F_20_24 * all_df$rate
+all_df$F_25_29_r = all_df$F_25_29 * all_df$rate
+all_df$F_30_34_r = all_df$F_30_34 * all_df$rate
+all_df$F_35_39_r = all_df$F_35_39 * all_df$rate
+all_df$F_40_44_r = all_df$F_40_44 * all_df$rate
+all_df$F_45_49_r = all_df$F_45_49 * all_df$rate
+all_df$M_20_24_r = all_df$M_20_24 * all_df$rate
+all_df$M_25_29_r = all_df$M_25_29 * all_df$rate
+all_df$M_30_34_r = all_df$M_30_34 * all_df$rate
+all_df$M_35_39_r = all_df$M_35_39 * all_df$rate
+all_df$M_40_44_r = all_df$M_40_44 * all_df$rate
+all_df$M_45_49_r = all_df$M_45_49 * all_df$rate
+
+all_df %>% 
+  group_by(bjd_code) %>% 
+  summarise(F_20_24_r = sum(F_20_24_r), 
+            F_25_29_r = sum(F_25_29_r),
+            F_30_34_r = sum(F_30_34_r),
+            F_35_39_r = sum(F_35_39_r),
+            F_40_44_r = sum(F_40_44_r),
+            F_45_49_r = sum(F_45_49_r),
+            M_20_24_r = sum(M_20_24_r),
+            M_25_29_r = sum(M_25_29_r),
+            M_30_34_r = sum(M_30_34_r),
+            M_35_39_r = sum(M_35_39_r),
+            M_40_44_r = sum(M_40_44_r),
+            M_45_49_r = sum(M_45_49_r)) ->
+  all_df
+
+head(all_df)
+describe(all_df)
+```
+
+```{r}
+# colnames(all_df)
+cols = c('bjd_code', 'F_20_24_r', 'F_25_29_r', 'F_30_34_r', 'F_35_39_r', 'F_40_44_r', 'F_45_49_r', 'M_20_24_r', 'M_25_29_r', 'M_30_34_r', 'M_35_39_r', 'M_40_44_r', 'M_45_49_r')
+all_df2 = all_df[, cols]
+
+cols2 = c('EMD_CD', 'F_20_24', 'F_25_29', 'F_30_34', 'F_35_39', 'F_40_44', 'F_45_49', 'M_20_24', 'M_25_29', 'M_30_34', 'M_35_39', 'M_40_44', 'M_45_49')
+colnames(all_df2) <- cols2
+head(all_df2)
+
+write.csv(all_df2, 'cleaned_bjd_geoju_201908.csv', fileEncoding = 'UTF-8', row.names = FALSE)
+```

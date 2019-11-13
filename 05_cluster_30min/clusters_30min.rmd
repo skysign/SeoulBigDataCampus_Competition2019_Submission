@@ -1,0 +1,399 @@
+---
+title: "Untitled"
+author: "author"
+date: '2019 9 12 '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library}
+library(dplyr)
+```
+
+# 각 클러스터별 30분 이내 거리에 있는 동 목록
+- 서울 직장인 출퇴근 시간 1시간 8분
+ - 편도 33.9분
+- 출근시간보다 더 먼거리를 가지는 않을 것으로 예상
+
+* Google Distance Matrix API사용은 아래 링크 참고하세요.
+ * https://github.com/skysign/example_google_distance_matrix_api_in_R
+
+```{r}
+library(httr)
+library(XML)
+
+google_distance_matrix <- function(src_addr,
+                                   dst_addr,
+                                   arrival_time,
+                                   key) {
+  # myurl = 'https://maps.googleapis.com/maps/api/distancematrix/json'
+  myurl = 'https://maps.googleapis.com/maps/api/distancematrix/xml'
+  
+  res <- httr::GET(
+    url = myurl,
+    query = list(
+      origins = src_addr,
+      destinations = dst_addr,
+      language = 'ko',
+      mode = 'transit',
+      arrival_time = arrival_time,
+      key = key
+    )
+  )
+
+  res_xml = httr::content(res, as = 'text')
+  return(res_xml)
+}
+
+library(lubridate)
+
+getSecondsOfUTCUntilTodayHHMMKST <- function(HH, MM) {
+  now<-strptime(now(),"%Y-%m-%d %H:%M:%S")
+  now
+  # now$year
+  # now$mon
+  # now$mday
+  
+  year = now$year + 1900
+  month = now$mon + 1
+  # 코드 실행하는 지금이 10월 12일 토요일
+  # 10월 14일 월요일이 되도록 +2
+  day = now$mday +2
+  
+  HHMMSS = sprintf(' %d:%d:%d', HH, MM, 00)
+  
+  str_date = paste(year, month, day, HHMMSS)
+  #str_date = paste(year, month, day, ' 10:30:00')
+  # str_date
+  
+  # a = strptime(str_date,"%Y %m %d %H:%M:%S", tz = 'Etc/GMT-9')
+  # today_HHMM_1930_KST = as.POSIXct(a, tzone = 'Etc/GMT-9')
+  
+  a = strptime(str_date,"%Y %m %d %H:%M:%S", tz = 'Asia/Seoul')
+  today_HHMM_KST = as.POSIXct(a, tzone = 'Asia/Seoul')
+  # today_HHMM_KST
+
+  HHMM_UTC = as.POSIXct(as.integer(today_HHMM_KST), tz = 'GMT', origin = '1970-01-01')
+  # HHMM_UTC
+  
+  return(as.integer(HHMM_UTC))
+}
+
+getSecondsOfUTCUntilTodayHHMMKST(19, 30)
+```
+
+
+
+# 전국 시/구/동 불러오기
+
+```{r}
+# jscode20190701.zip
+# 출처 : 전국 법정동 코드 동이름
+# https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=71566
+
+jeonkuk_dongname_df <- read.csv('../03_cleaning_address/jeonkuk_dongcode_dongname.csv', header = TRUE, fileEncoding = 'UTF-8')
+
+jeonkuk_dongname_df$bjd_code = as.character(jeonkuk_dongname_df$bjd_code)
+jeonkuk_dongname_df$si_do = as.character(jeonkuk_dongname_df$si_do)
+jeonkuk_dongname_df$gun_gu = as.character(jeonkuk_dongname_df$gun_gu)
+jeonkuk_dongname_df$myun_dong = as.character(jeonkuk_dongname_df$myun_dong)
+
+head(jeonkuk_dongname_df)
+```
+
+# 서울 지도 데이터 불러 오기
+
+```{r}
+seoul_map_df = read.csv('../02_cleaning_map_data/cleaned_seoul_map.csv')
+
+seoul_map_df = transform(seoul_map_df,
+                         EMD_CD = as.character(EMD_CD))
+
+head(seoul_map_df)
+```
+
+# 이동시간 계산할 동 목록 만들기
+- 클러스터링한 위치가 dst
+- 동 전체주소가 src
+- google distance matrix api사용해서 이동 시간 계산 예정
+```{r}
+seoul_map_df %>% 
+  select('EMD_CD') ->
+  df
+
+seoul_dongcode_df = data.frame(EMD_CD = unique(df$EMD_CD))
+seoul_dongcode_df$EMD_CD = as.character(seoul_dongcode_df$EMD_CD)
+head(seoul_dongcode_df)
+
+seoul_dong_fulladdress_df = merge(seoul_dongcode_df, jeonkuk_dongname_df, by.x = 'EMD_CD', by.y = 'bjd_code')
+seoul_dong_fulladdress_df$EMD_CD = as.character(seoul_dong_fulladdress_df$EMD_CD)
+seoul_dong_fulladdress_df$address = as.character(seoul_dong_fulladdress_df$address)
+head(seoul_dong_fulladdress_df)
+nrow(seoul_dong_fulladdress_df)
+```
+
+
+
+# 클러스터링한 위치, 데이터 가공
+- Google distance matrix API를 사용하려면, 한국어 주소가 필요함
+- 클러스터링한 위치는 shapre 파일에서 온 것으로, UTM-K 를 따른다
+- 구글맵에 위경도를 입력하면 주소를 알 수 있음
+- 클러스터링한 위치를 아래 사이트에서 위경도로 변환함
+ - http://map.ngii.go.kr/ms/mesrInfo/coordinate.do#none
+
+```{r}
+cluster_center_df = read.csv('../04_subway/cluster_center.csv')
+cluster_center_df
+```
+
+```{r}
+# EPSG 5179를 위경도로 변환함
+long_df = data.frame(long = c())
+lat_df = data.frame(lat = c())
+
+for (n in seq(1, nrow(cluster_center_df), 1)) {
+  p1 = st_point(c(cluster_center_df$center_long[[n]],cluster_center_df$center_lat[[n]])
+  )
+  
+  sfc = st_sfc(p1, crs = 5179)
+  sfc
+  
+  a = st_coordinates(st_transform(sfc, crs = 4326))
+  # print(a[1,2])
+  lo = data.frame(long = c(a[1,2]))
+  long_df = rbind(long_df, lo)
+  # print(a[1,1])
+  la = data.frame(lat = c(a[1,1]))
+  lat_df = rbind(lat_df, la)
+}
+
+df = cbind(long_df, lat_df)
+cluster_center_df = cbind(cluster_center_df, df)
+cluster_center_df
+```
+
+```{r}
+# 위경도로 주소를 찾으면, 주소가 없는 경우도 있어서,
+# 매뉴얼로 위경도를 구글맵에 카피해서, 가장 가까운 주소를 선택함
+
+#37.56690,127.0065 서울특별시 중구 광희동 을지로41길
+#37.62358,127.0671 서울특별시 월계3동 18 월계미륭아파트
+#37.52162,126.8699 서울특별시 양천구 신정6동 318-8
+#37.57833,126.9214 서울특별시 서대문구 남가좌2동 354-35
+#37.50837,127.0832 서울특별시 송파구 잠실동 218-8
+#37.51664,126.9699 서울특별시 용산구 이촌1동 302-17
+
+address = c('서울특별시 중구 광희동 을지로41길',
+            '서울특별시 월계3동 18 월계미륭아파트',
+            '서울특별시 양천구 신정6동 318-8',
+            '서울특별시 서대문구 남가좌2동 354-35',
+            '서울특별시 송파구 잠실동 218-8',
+            '서울특별시 용산구 이촌1동 302-17')
+
+cluster_center_df = cbind(cluster_center_df, address)
+cluster_center_df$address = as.character(cluster_center_df$address)
+cluster_center_df
+```
+# 우선 로깅부터 준비
+
+```{r}
+library(logging)
+basicConfig()
+basicConfig(level='FINEST')
+addHandler(writeToFile, file="google_distance_matrix_api.log", level='FINEST')
+with(getLogger(), names(handlers))
+logdebug('test %d', 2)
+
+log <- function(...) invisible(logdebug(...))
+log('log function %d', 2)
+```
+
+# 한번 거리 재보기
+
+```{r}
+gdm_key = readLines('../../SeoulBigDataCampus_Competition2019_Submission_data/cluster_30min/google_distance_matrix_key.private')
+```
+
+```{r}
+arrival_unixtime = getSecondsOfUTCUntilTodayHHMMKST(19, 30)
+arrival_unixtime
+```
+
+```{r}
+
+full_addr_from_bjd_code <- function(df, code) {
+  df %>%
+    filter(df$EMD_CD == code) -> rtn
+  
+  return(rtn$address)
+}
+
+code = '1111010100'
+
+src_addr = full_addr_from_bjd_code(seoul_dong_fulladdress_df, code)
+src_addr
+dst_addr = '서울특별시 중구 광희동 을지로41길'
+dst_addr
+
+
+res = google_distance_matrix(src_addr, dst_addr, arrival_unixtime, gdm_key)
+res
+xmlResult <- xmlParse(res)
+xmlRoot = xmlRoot(xmlResult)
+xmlRoot
+```
+
+에러 체크하는 함수, 0이면 정상, 음수면 에러
+
+```{r}
+get_status <- function(res)
+{
+  xmlResult <- xmlParse(res)
+  xmlRoot = xmlRoot(xmlResult)
+  xmlRoot
+
+  xPath_status = '/DistanceMatrixResponse/status/text()'
+  node = xpathApply(xmlRoot, xPath_status)
+  if (is.null(node))
+    return(-5)
+
+  v = node[[1]]
+  ## 00  
+  v = xmlValue(v)
+  # print('00')
+  if (!strcmp(v, 'OK'))
+    return(-51)
+
+  xPath_status = '/DistanceMatrixResponse/row/element/status/text()'
+  node = xpathApply(xmlRoot, xPath_status)
+  if (is.null(node))
+    return(-6)
+
+  v = node[[1]]
+  ## 00  
+  v = xmlValue(v)
+  # print('00')
+  if (!strcmp(v, 'OK'))
+    return(-61)
+    
+  return(0)
+}
+```
+
+값 가지고 오는 함수
+
+```{r}
+library(pracma)
+
+get_values <- function(res)
+{
+  xmlResult <- xmlParse(res)
+  xmlRoot = xmlRoot(xmlResult)
+  xmlRoot
+
+  xPath_duration_value = '/DistanceMatrixResponse/row/element/duration/value/text()'
+  node = xpathApply(xmlRoot, xPath_duration_value)
+  if (is.null(node))
+    return(c(-8, 0))
+
+  v = node[[1]]
+  v = xmlValue(v)
+  v = as.integer(v)
+  duration_value = v
+  # log(class(duration_value))
+
+  xPath_distance_value = '/DistanceMatrixResponse/row/element/distance/value/text()'
+  node = xpathApply(xmlRoot, xPath_distance_value)
+  if (is.null(node))
+    return(c(-9, 0))
+
+  v = node[[1]]
+  v = xmlValue(v)
+  v = as.integer(v)
+  distance_value = v
+  # log(class(distance_value))
+    
+  return(c(duration_value, distance_value))
+}
+```
+
+```{r}
+rtn = get_status(res)
+log("rtn(%d) %s %s %s", rtn, src_addr, src_addr, code)
+
+if (0 == rtn) {
+  rtn = get_values(res)
+  duration_value = rtn[1]
+  distance_value = rtn[2]
+  log("Success duration_value(%s) distance_value(%s)", duration_value, distance_value)
+} else {
+  log("res")
+  log("%s", res)
+}
+
+```
+
+# 각 클러스터/각 동의 이동시간및 이동거리 구하기
+
+```{r}
+get_duration_and_distance <- function(cluster_id, dst_addr, dong_df, rtn_df) {
+  for(n in 1:nrow(dong_df)) {
+    code = dong_df$EMD_CD[[n]]
+    src_addr = dong_df$address[[n]]
+    log('%d EMD_CD:%s src_addr:%s cluster_id:%s dst_addr:%s', n, code, src_addr, cluster_id, dst_addr)
+    res = google_distance_matrix(src_addr, dst_addr, arrival_unixtime, gdm_key)
+    
+    rtn = get_status(res)
+    log("rtn(%d)", rtn)
+    
+    if (0 == rtn) {
+      rtn = get_values(res)
+      duration_value = rtn[1]
+      distance_value = rtn[2]
+      log("Success duration_value(%s) distance_value(%s)", duration_value, distance_value)
+      
+      add_df = data.frame(cluster_id = c(cluster_id), EMD_CD = c(code), duration = c(duration_value), distance=c(distance_value))
+      rtn_df = rbind(rtn_df, add_df)
+    }
+    else {
+      log("res")
+      log("%s", res)
+    }
+    
+    # loop 디버깅용 break  
+    # if (n >= 3) {
+    #   return(rtn_df)
+    # }
+  }
+  
+  return(rtn_df)
+}
+
+# 클러스터링 df
+# cluster_address_df
+
+# 서울 동 주소 df
+dong_df = seoul_dong_fulladdress_df
+
+rtn_df = data.frame(cluster_id = c(), EMD_CD = c(), duration = c(), distance = c())
+
+for(n in 1:nrow(cluster_address_df)) {
+  cluster_id = n
+  dst_addr = cluster_address_df$address[[n]]
+  # print(dst_addr)
+  rtn_df = get_duration_and_distance(cluster_id, dst_addr, dong_df, rtn_df)
+
+  # loop 디버깅용 break  
+  # if (n > 1) {
+  #   break
+  # }
+}
+
+head(rtn_df)
+
+# 
+write.csv(rtn_df, 'cluster_seoul_dong_duration_distance.csv', fileEncoding = 'UTF-8', row.names = FALSE)
+```

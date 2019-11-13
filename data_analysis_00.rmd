@@ -1,0 +1,444 @@
+---
+title: "Untitled"
+author: "author"
+date: '2019 9 22 '
+output: html_document
+---
+
+```{r install_package, include=FALSE}
+# install.packages("qcc")
+# install.packages('extrafont')
+# install.packages("RColorBrewer")
+# install.packages("wesanderson") RColorBrewer와 같은 역할, RColorBrewer를 사용하기로 함
+# install.packages("ggforce")
+```
+
+```{r setup, include=FALSE}
+options(warn=0)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries}
+library(dplyr)
+library(ggplot2)
+library(extrafont)
+library(ggforce) # geom_circle()
+
+library(RColorBrewer)
+display.brewer.all()
+
+# library(wesanderson)
+
+# font_import(pattern = 'HUJingo')
+```
+
+# '????' 소개
+
+- 어떤 곳에서 모임/행사를 연다고 할 때, 가장 많은 사람들이 올 수 있는 위치는 어디인가?
+
+비영리 단체들이 모임/행사를 연다고 할 때, 회사원들의 퇴근 후 참여를 기대 하지만, 많은 사람들이 참여 할 수 있는 위치에서, 모임/행사를 열고 있는지, 알기 어렵다.
+특정위치에, 일정시간안에 이동해서, 참석할 수 있는 사람 수 를 지도위에 시각화해서, 더 많은 사람들이 참석할 수 있는 곳에서 모임/행사를 열 수 있도록 돕는다.
+
+## 직장인 A씨의 퇴근 후, 봉사활동 참여 가상 시나리오
+
+평소 봉사활동 참여에 관심이 많던 A씨, SNS에서 B단체가 추최하는 봉사활동 광고를 보게 되었다.
+봉사활동 장소까지 얼마나 걸리는지 확인해 보기 위해서, 카카오 맵을 켠다.
+퇴근 시간, 막히는 것을 고려해서, 대중교통으로 걸리는 시간을 알아 보니, 대략 40분 정도...
+정시퇴근으로 업무를 서둘러 마치고, 봉사 활동에 참여한다.
+
+## 가상 시나리오에 따른, 이동시간/교통수단/장소의 가정
+- 일반적인 퇴근시간 평일 오후 6시에서, 출발해서, 오후 19시 30분 도착하는 것으로 가정한다.
+- 환승역이 있는 동에서, 모임/행사를 여는 것으로 가정한다.
+- 퇴근 시간임으로 교통 정체를 가만해서, 대중교통으로 이동 하는 것으로 가정한다.
+- 퇴근 후 봉사활동에 참여할 만큼 사회활동에 적극적인 연령대로 가정하여, 50세 미만으로 가정한다.
+
+## 데이터 출처
+- 서울특별시 빅데이터 허브, 거주인구(행정동) <- 추가로 분석할 예정
+- 국민연금 가입 통계정보제공 서비스, 직장인 가입자 동별 인구수 <- 이 리포트에 인구수 출처
+- 구글 Distance Matrix API
+
+# 인구 기초 통계 분석
+
+## 인구 성별 연령대별 통계분석
+```{r}
+# NPS_seoul_dong_age_sex_clss_number.csv
+# 국민연금 OpenAPI로 각 법정동별/연령별/성별 인구 분포 데이터
+seoul_dong_age_sex_clss_number_df = read.csv('01_NPS/dong_age_sex_clss_number.csv', fileEncoding = 'UTF-8')
+seoul_dong_age_sex_clss_number_df$number[seoul_dong_age_sex_clss_number_df$number == -1] <- 0
+head(seoul_dong_age_sex_clss_number_df)
+```
+#TODO 폰트 크기 조절
+#TODO 폰트 종류 변경
+```{r fig.width = 15, fig.height = 8, warning=FALSE}
+library(ggplot2)
+
+process2 <- function(df) {
+  df %>%
+    group_by(EMD_CD) %>%
+    summarise(number = sum(number)) -> 
+    rtn_df
+  
+  return(rtn_df)
+}
+
+seoul_plot2_df = process2(seoul_dong_age_sex_clss_number_df)
+
+
+my_pareto_chart <- function(df) {
+  df = df[with(df, order(-number)),]  
+  df$EMD_CD = as.character(df$EMD_CD)  
+  df$row_index = seq(nrow(df))
+  head(df)
+  
+  df$cumsum = cumsum(df$number)
+  df$cumsum = as.numeric(df$cumsum)
+
+  max_number = max(df$number)
+  max_cumsum = max(df$cumsum)
+  
+  x_label = paste0('서울시 동수 ', nrow(df), '개')
+  y_label = '동별 인구 수'
+  hline_label = paste0('전체 인구수의 75%  ', as.integer(max_cumsum*0.75 / 10000), '만명')
+  
+  hline_75p = (max_cumsum*0.75)*max_number/max_cumsum
+  
+  theme_update(text=element_text(family="HUJingo340"))
+  
+  ggplot(data = df) +
+    geom_bar(mapping = aes(x = row_index, y = number), stat = "identity") +  
+    # xlab(x_label) +
+    # ylab(y_label) +    
+    xlab('') +
+    ylab('') +
+    geom_line(mapping = aes(x = row_index, y = cumsum*max_number/max_cumsum, color = "red"), show.legend = FALSE) + 
+    # scale_y_continuous(sec.axis = sec_axis(~ . *max_cumsum/max_number, name = '인구수 누적')) +
+    scale_y_continuous(sec.axis = sec_axis(~ . *max_cumsum/max_number, name = ' ')) +
+    scale_x_continuous(limits = c(0,119)) +
+    geom_hline(yintercept=hline_75p, linetype="dashed", color = "blue") +
+    # geom_text(aes(0, hline_75p), label = hline_label, vjust = -1, hjust= -1)
+    geom_text(aes(0, hline_75p), label = '', vjust = -1, hjust= -1)
+}
+
+# 전체 인구수의 75% 164만명
+# 상위 98개 동 인구 합하면, 75% 인구수 넘음
+# 파란색 선
+my_pareto_chart(seoul_plot2_df)
+# seoul_plot2_df
+```
+
+- 빨간색 점 : 평균 [전체 인구수 / 전체 동수]
+- 팍란색 점 : 각 동의 인구수
+- 검은색 점 : 파란색점을 가운대, 검은 실선 위로 옮겨 놓은것
+- 사각형의 아랫변 : 하위 25% 동수
+- 사각형의 윗변 : 상위 75% 동수
+- 중앙 실선 : 25%~75% 높이의 1.5배 길이
+- 동수 467개
+
+```{r fig.width = 12, fig.height = 8, warning=FALSE}
+graph3 <- function(df) {
+  number_of_dong = length(unique(df$EMD_CD))
+  
+  # title1 = '동의 인구수기준 Box Plot / 전체 동 수 : '
+  # title = paste(title1, number_of_dong)
+  # x_lable = ''
+  # y_lable = '인구수'
+  
+  title1 = ' '
+  title = ' '
+  x_lable = ' '
+  y_lable = ' '
+  
+  ggplot(data = df, aes(x = 1, y = number)) +
+    geom_boxplot(alpha = 0.5) +
+    ggtitle(title) +
+    geom_jitter(width = 0.35, color='blue', alpha = 0.5) +
+    labs(x = x_lable, y = y_lable) +
+    theme(plot.title=element_text(size=20, vjust=2, color="black")) +
+    stat_summary(fun.y=mean, geom="point", color = 'red', size=4)
+}
+
+graph3(seoul_plot2_df)
+```
+
+## 인구수 75%를 차지하는 동의 리스트 구하기
+
+위의 히스토그램, 바차트, 박스플롯에서 볼 수 있듯이, 인구가 상위 25%동에 몰려 있음.
+
+인구수가 많은 동에 집중하기 위해서, 아래와 같은 기준으로 동을 구분합니다.
+
+* 인구수 기준으로 동을 정렬합니다.
+* 가장 인구수가 많은 동부터 인구를 더하기 시작합니다.
+* 더한 인구수가 전체 인구의 75% 가 될 때 까지, 계속 더합니다.
+* 인구수의 75%를 차지 하는 동의 리스트를 구합니다.
+* 이 동의 리스트에 인구가 집중되어 있으므로, 이 동 리스트만 시각화에 사용합니다.
+
+```{r}
+printf <- function(...) invisible(print(sprintf(...)))
+
+process3 <- function(df) {
+  df = df[with(df, order(-number)),]  
+  
+  population = sum(df$number)
+  print(population)
+  population_75p = as.integer(population * 0.75)
+  print(population_75p)
+
+  rtn_75_df = data.frame()
+  current_population = 0
+  print(current_population)
+  
+  for(n in 1:nrow(df)) {
+    current_population = current_population + df$number[[n]]
+
+    # printf("%d 75Percent(%d), crnt_pop(%d), add(%d)", n, population_75p, current_population, df$number[[n]])
+
+    rtn_75_df = rbind(rtn_75_df, slice(df, n:n))
+
+    if (current_population > population_75p) {
+      break
+    }
+  }
+  
+  rtn_75_df$EMD_CD = as.character(rtn_75_df$EMD_CD)
+  return(rtn_75_df)
+}
+```
+
+```{r}
+# jscode20190701.zip
+# 전국 법정동 코드 동이름
+# https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=71566
+
+jeonkuk_dongname <- read.csv('03_Cleaning_address/jeonkuk_dongcode_dongname.csv', header = TRUE, fileEncoding = 'UTF-8')
+
+jeonkuk_dongname$bjd_code = as.character(jeonkuk_dongname$bjd_code)
+jeonkuk_dongname$si_do = as.character(jeonkuk_dongname$si_do)
+jeonkuk_dongname$gun_gu = as.character(jeonkuk_dongname$gun_gu)
+jeonkuk_dongname$myun_dong = as.character(jeonkuk_dongname$myun_dong)
+
+head(jeonkuk_dongname)
+```
+
+```{r}
+library(psych)
+
+# 국민연금 2~40대 가입자수 2189518
+# 75% 164만명
+
+seoul_pop75p_df = process3(seoul_plot2_df)
+```
+
+- 인구수가 많은 동부터, 적은 동으로 내림차순 정렬하여
+- 전체 인구의 75%를 차지 하는 동의 리스트를 만듭니다
+
+```{r}
+seoul_pop75p_dong_name_df = merge(seoul_pop75p_df, jeonkuk_dongname, by.x = 'EMD_CD', by.y = 'bjd_code')
+seoul_pop75p_dong_name_df = seoul_pop75p_dong_name_df[with(seoul_pop75p_dong_name_df, order(-number)),]
+
+seoul_pop75p_dong_name_df %>%
+  select(EMD_CD, address, number)
+```
+
+# 지도에 동 인구수별/이동시간별 시각화 하기
+
+지도 데이터 로딩하기
+
+```{r}
+seoul_dong_name_pos_df = read.csv('./02_cleaning_map_data/cleaned_seoul_dong_name_pos.csv', fileEncoding = 'UTF-8')
+
+seoul_dong_name_pos_df$EMD_CD = as.character(seoul_dong_name_pos_df$EMD_CD)
+seoul_dong_name_pos_df$EMD_KOR_NM = as.character(seoul_dong_name_pos_df$EMD_KOR_NM)
+seoul_dong_name_pos_df$long = as.integer(seoul_dong_name_pos_df$long)
+seoul_dong_name_pos_df$lat = as.integer(seoul_dong_name_pos_df$lat)
+
+seoul_map_df = read.csv('./02_cleaning_map_data/cleaned_seoul_map.csv')
+seoul_map_df$EMD_CD = as.character(seoul_map_df$EMD_CD)
+seoul_map_df$long = as.integer(seoul_map_df$long)
+seoul_map_df$lat = as.integer(seoul_map_df$lat)
+
+head(seoul_dong_name_pos_df)
+head(seoul_map_df)
+```
+
+```{r fig.width = 25, fig.height = 25, warning=FALSE}
+
+#서울시지도를 동별로 그려보겠습니다. (법정동 기준 지도 입니다.)
+
+graph1_map_dongname <- function(map_df, dong_name_pos_df) {
+  p <- ggplot(data = map_df, aes(x = long, y = lat, group = id)) +
+    geom_path(color = 'black', size = .5) +
+    geom_text(aes(label = EMD_KOR_NM), data = dong_name_pos_df, size = 5) +
+    coord_fixed(1)
+  p  
+}
+
+graph1_map_only <- function(map_df, dong_name_pos_df) {
+  p <- ggplot(data = map_df, aes(x = long, y = lat, group = id)) +
+    geom_path(color = 'black', size = .5) +
+    coord_fixed(1)
+  p  
+}
+
+graph1_map_only(seoul_map_df, seoul_dong_name_pos_df)
+```
+
+
+
+## 서울시 인구 75% 차지 하는 동만 지도에 표시
+
+```{r}
+head(seoul_pop75p_df)
+
+seoul_map_top75_df = merge(seoul_map_df, seoul_pop75p_df, by.x = 'EMD_CD', by.y = 'EMD_CD')
+
+seoul_map_top75_df = seoul_map_top75_df[with(seoul_map_top75_df, order(id, order)), ]
+head(seoul_map_top75_df)
+# length(unique(seoul_map_top75_df$EMD_CD))
+# length(unique(seoul_map_top75_df$EMD_CD))
+```
+
+
+```{r fig.width = 25, fig.height = 25, warning=FALSE}
+
+graph6 <- function(map_df, map_top75_df, dong_name_pos_df) {
+  dong_all = length(unique(map_df$EMD_CD))
+  dong_75p_all = length(unique(map_top75_df$EMD_CD))
+  
+  # title1 = '인구수 상위 75% 동만 표시'
+  # title = paste(title1, '    ', '상위75% 동수 :', dong_75p_all, '/', '전체 동수 :', dong_all)
+  # x_label = '경도'
+  # y_label = '위도'
+  # legend_title= '인구수'
+  
+  title1 = ' '
+  title = ' ' #paste(title1, '    ', '상위75% 동수 :', dong_75p_all, '/', '전체 동수 :', dong_all)
+  x_label = ' '
+  y_label = ' '
+  legend_title= '인구수'
+  
+  barwidth = 1 * 30
+  barheight = 0.05
+  
+  lat_margin = 120
+  
+  p <- ggplot(data = map_df, aes(x = long, y = lat, group = id)) +
+    geom_polygon(data = map_top75_df, aes(x = long, y = lat, group = id, fill = number)) +
+    geom_path(color = 'black', size = .5) +
+    geom_text(aes(label = EMD_KOR_NM), data = dong_name_pos_df, size = 7) +
+    scale_fill_gradient(low = "white", high = "green", name = legend_title) +
+    coord_fixed(1) + 
+    ggtitle(title) +
+    labs(x = x_label, y = y_label) +
+    theme(legend.text = element_text(size = 20, family="NanumGothicCoding"),
+          legend.title = element_text(size = 25, family="NanumGothicCoding"),
+          legend.key.size = unit(2, "cm"))
+  return(p)
+}
+```
+
+```{r fig.width = 25, fig.height = 25, warning=FALSE}
+#seoul_map_top75_df
+#seoul_dong_name_pos_df
+
+# 인구수가 상위 75% 이내에 들어가는 동만, 동이름 표시
+
+tmp_df = merge(seoul_pop75p_df, seoul_dong_name_pos_df, by.x = 'EMD_CD', by.y = 'EMD_CD')
+# head(tmp_df)
+p = graph6(seoul_map_df, seoul_map_top75_df, tmp_df)
+p
+```
+
+```{r fig.width = 25, fig.height = 25, warning=FALSE}
+draw_map_cluster <- function(map_df, s_df, c_df) {
+  
+  d1 = 10*15
+  r2 = 100 * 30
+  
+  t1 = 5
+  
+  # print(nrow(c_df))
+  # print(c_df$mycolors)
+  
+  p <- ggplot(inherit.aes = FALSE) +
+    geom_path(data = map_df, color = 'black', 
+              aes(x = long, y = lat, group = id),
+              size = .5) +
+    geom_rect(data = s_df,
+              fill = s_df$mycolors,
+              size = t1,
+              aes(x = long, y = lat,
+                  xmin = long-d1, xmax = long+d1,
+                  ymin = lat-d1, ymax = lat+d1),
+              # inherit.aes = FALSE,
+              alpha = 0.5)
+    
+  N_cluster = nrow(c_df)
+  l = unique(c_df$cluster_id)
+  # for(n in seq(1, N_cluster, 1)){
+  for(n in l){
+    print(n)
+    center_df %>%
+      filter(cluster_id == n) ->
+      one_c_df    
+    p_circle = geom_circle(data = one_c_df,
+                # color = a_center_df$mycolors,
+                fill = one_c_df$mycolors,
+                aes(x0 = center_long, y0 = center_lat,
+                    # fill = mycolors,
+                    r = r2),
+                linetype = 'blank',
+                inherit.aes = FALSE,
+                alpha = 0.5)    
+    p = p + p_circle
+  }
+
+  p = p + coord_fixed(1)
+
+  return(p)
+}
+
+multiple_lines_seoul_subway_cluster_df = read.csv('04_subway/multiple_lines_seoul_subway_cluster.csv', fileEncoding = 'UTF-8')
+cluster_center_df = read.csv('04_subway/cluster_center.csv', fileEncoding = 'UTF-8')
+
+# 환승역 클러스터 컬러  
+N_cluster = nrow(cluster_center_df)
+cluster_id = seq(1, N_cluster, by=1)
+mycolors = brewer.pal(n = N_cluster, name = "Dark2")
+  
+color_df = data.frame(cluster_id, mycolors)
+color_df$mycolors = as.character(color_df$mycolors)
+
+color2_df = data.frame(cluster_id, mycolors)
+color2_df$mycolors = as.character(color_df$mycolors)
+
+subway_df = merge(multiple_lines_seoul_subway_cluster_df, color_df, by.x = 'cluster', by.y = 'cluster_id')
+center_df = merge(cluster_center_df, color2_df, by.x = 'cluster_id', by.y = 'cluster_id')
+
+head(subway_df)
+head(center_df)
+
+p = draw_map_cluster(seoul_map_df, subway_df, center_df)
+p
+```
+
+
+```{r fig.width = 25, fig.height = 25, warning=FALSE}
+N_cluster = nrow(center_df)
+print(N_cluster)
+# N_cluster = 2
+
+for (n in seq(1, N_cluster, 1)) {
+  print(n)
+  subway_df %>%
+    filter(cluster == n) ->
+    one_subway_df
+  
+  center_df %>%
+    filter(cluster_id == n) ->
+    one_center_df
+  
+  p = draw_map_cluster(seoul_map_df, one_subway_df, one_center_df)
+  print(p)
+}
+
+```

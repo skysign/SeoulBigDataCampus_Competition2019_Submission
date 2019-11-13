@@ -1,0 +1,141 @@
+---
+title: "Untitled"
+author: "author"
+date: '2019 9 12 '
+output: html_document
+---
+
+# Cleaning Data
+
+https://github.com/skysign/drawing_south_korea_map_in_R 에서, 수집한 데이터를 필요에 따라서, cleaning하겠습니다.
+south_korea_dong_code_201905.csv 및 south_korea_dong_map_201905.csv 파일은 위의 리포를 참고하세요.
+
+## 동별 인구 데이터 클리닝
+
+## 지도 데이터 클리닝
+
+지도 데이터 부터 불러 오기
+```{r}
+dong_data_df = read.csv('../../SeoulBigDataCampus_Competition2019_Submission_data/map_data/south_korea_dong_code_201905.csv')
+dong_geometry_df = read.csv('../../SeoulBigDataCampus_Competition2019_Submission_data/map_data/south_korea_dong_map_201905.csv')
+
+dong_data_df = transform(dong_data_df, 
+                          EMD_CD = as.character(EMD_CD))
+dong_data_df = transform(dong_data_df, 
+                          EMD_ENG_NM = as.character(EMD_ENG_NM))
+dong_data_df = transform(dong_data_df, 
+                          EMD_KOR_NM = as.character(EMD_KOR_NM))
+
+head(dong_data_df)
+head(dong_geometry_df)
+```
+
+필요한 데이터만 남기고, 나머지 컬럼은 삭제하기기
+
+```{r}
+library(dplyr)
+
+dong_data_df <- dong_data_df %>%
+  select(EMD_CD, EMD_KOR_NM, id)
+
+head(dong_data_df)
+
+dong_geometry_df <- dong_geometry_df %>%
+  select(long, lat, order, id)
+
+head(dong_geometry_df)
+```
+
+일부 지역 데이터만 뽑기 위해서, 두 데이터 프레임을 합치겠습니다.
+
+```{r}
+dong_df = merge(dong_data_df, dong_geometry_df, by.x = 'id', by.y = 'id')
+```
+
+### 서울 데이터만 뽑기
+
+```{r}
+dong_df %>%
+  filter(substr(EMD_CD, 1, 2) == '11') ->
+  seoul_df
+
+head(seoul_df)
+tail(seoul_df)
+```
+
+### 서울 지도 데이터만 저장하기
+
+* 저장하기 전에 id 순으로 먼저 정렬 하고, order 순으로 정렬한 뒤 저장해야, 나중에 지도를 그렸을 때, 올바르게 표시됩니다.
+
+dong_seoul_dis_df[with(dong_seoul_dis_df, order(id, order)),]
+
+```{r}
+seoul_df %>%
+  filter(substr(EMD_CD, 1, 2) == '11') %>%
+  select(EMD_CD, long, lat, order, id) ->
+  seoul_geometry_df
+
+seoul_geometry_df = seoul_geometry_df[with(seoul_geometry_df, order(id, order)), ]
+
+head(seoul_geometry_df)
+tail(seoul_geometry_df)
+
+write.csv(seoul_geometry_df, 'cleaned_seoul_map.csv', fileEncoding = 'UTF-8', row.names = FALSE, col.names = TRUE)
+```
+
+### 서울 동이름, 동의 위치 데이터만 저장하기
+
+```{r}
+seoul_df %>%
+  group_by(id, EMD_CD, EMD_KOR_NM) %>%
+  summarise(long = mean(long), lat = mean(lat)) ->
+  seoul_dong_name_pos
+
+head(seoul_dong_name_pos)
+tail(seoul_dong_name_pos)
+
+write.csv(seoul_dong_name_pos, 'cleaned_seoul_dong_name_pos.csv', fileEncoding = 'UTF-8', row.names = FALSE, col.names = TRUE)
+```
+
+### 대전
+
+```{r}
+process_map <- function(df, sido_code, filename_prefix) {
+  df %>%
+    filter(substr(EMD_CD, 1, 2) == sido_code) ->
+    sido_df
+  
+  sido_df %>%
+    select(EMD_CD, long, lat, order, id) ->
+    sido_geometry_df
+  
+  sido_geometry_df = sido_geometry_df[with(sido_geometry_df, order(id, order)), ]
+  
+  head(sido_geometry_df)
+  tail(sido_geometry_df)
+  
+  filename = paste0(filename_prefix, '_map.csv')
+  write.csv(sido_geometry_df, filename, fileEncoding = 'UTF-8', row.names = FALSE)
+  
+  sido_df %>%
+    group_by(id, EMD_CD, EMD_KOR_NM) %>%
+    summarise(long = mean(long), lat = mean(lat)) ->
+    sido_dong_name_pos
+  
+  head(sido_dong_name_pos)
+  tail(sido_dong_name_pos)
+  
+  filename = paste0(filename_prefix, '_dong_name_pos.csv')
+  write.csv(sido_dong_name_pos, filename, fileEncoding = 'UTF-8', row.names = FALSE)
+}
+```
+
+```{r}
+process_map(dong_df, '30', 'cleaned_daejeon')
+```
+
+### 대구
+
+```{r}
+process_map(dong_df, '27', 'cleaned_daegu')
+```

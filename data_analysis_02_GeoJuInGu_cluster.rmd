@@ -1,0 +1,284 @@
+---
+title: "Untitled"
+author: "author"
+date: '2019 9 22 '
+output: html_document
+---
+
+```{r install_package, include=FALSE}
+# install.packages("qcc")
+# install.packages('extrafont')
+# install.packages("RColorBrewer")
+# install.packages("wesanderson") RColorBrewer와 같은 역할, RColorBrewer를 사용하기로 함
+# install.packages("ggforce")
+# install.packages('showtext')
+# install.packages('fmsb')
+```
+
+```{r setup, include=FALSE}
+options(warn=0)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries}
+library(dplyr)
+library(ggplot2)
+library(extrafont)
+library(ggforce) # geom_circle()
+
+library(RColorBrewer)
+display.brewer.all()
+
+library(showtext)
+font_add_google("Nanum Gothic", "nanumgothic", regular.wt = 400, bold.wt = 400)
+windows()
+
+library(fmsb)
+```
+
+# 거주인구 데이터
+```{r}
+pop_df = read.csv('./07_GeoJuInGu/cleaned_bjd_geoju_201908.csv', fileEncoding = 'UTF-8')
+head(pop_df)
+describe(pop_df)
+```
+
+# 지도 데이터 로딩하기
+```{r}
+# 출처 
+# http://www.gisdeveloper.co.kr/?p=2332&unapproved=28711&moderation-hash=bf738becd6dd0f8b10fd61503ceb93e7#comment-28711
+# 행정안전부
+# seoul_dong_name_pos_df = read.csv('./cleaned/cleaned_seoul_dong_name_pos.csv', fileEncoding = 'UTF-8')
+# 
+# seoul_dong_name_pos_df$EMD_CD = as.character(seoul_dong_name_pos_df$EMD_CD)
+# seoul_dong_name_pos_df$EMD_KOR_NM = as.character(seoul_dong_name_pos_df$EMD_KOR_NM)
+# seoul_dong_name_pos_df$long = as.integer(seoul_dong_name_pos_df$long)
+# seoul_dong_name_pos_df$lat = as.integer(seoul_dong_name_pos_df$lat)
+# head(seoul_dong_name_pos_df)
+
+seoul_map_df = read.csv('./02_cleaning_map_data/cleaned_seoul_map.csv', fileEncoding = 'UTF-8')
+seoul_map_df$EMD_CD = as.character(seoul_map_df$EMD_CD)
+
+head(seoul_map_df)
+
+# 각 클러스터/각 동 거리및 시간
+cluster_dong_df = read.csv('./05_cluster_30min/cluster_seoul_dong_duration_distance.csv', fileEncoding = 'UTF-8')
+cluster_dong_df$EMD_CD = as.character(cluster_dong_df$EMD_CD)
+
+# duration 컬럼 단위 초임
+# duration 분 컬럼 만듬
+cluster_dong_df$dur_min = cluster_dong_df$duration / 60
+head(cluster_dong_df)
+```
+
+```{r}
+rtn_df = pop_df
+
+rtn_df$all_F = rtn_df$F_20_24 + rtn_df$F_25_29 + rtn_df$F_30_34 + rtn_df$F_35_39 + rtn_df$F_40_44 + rtn_df$F_45_49
+rtn_df$all_M = rtn_df$M_20_24 + rtn_df$M_25_29 + rtn_df$M_30_34 + rtn_df$M_35_39 + rtn_df$M_40_44 + rtn_df$M_45_49
+rtn_df$pop = rtn_df$all_F + rtn_df$all_M
+
+head(rtn_df)
+
+write.csv(rtn_df, 'cleaned_bjd_pop_geoju.csv', fileEncoding = 'UTF-8', row.names = FALSE)
+```
+
+```{r}
+#rader chart를 사용해서,
+# 각 클러스터별 순위
+# - 인구 총수
+# - 여자 인구
+# - 남자 인구
+# - 20대
+# - 30대
+# - 40대
+
+pop_df = read.csv('cleaned_bjd_pop_geoju.csv', fileEncoding = 'UTF-8')
+head(pop_df)
+
+# 각 클러스터/각 동 거리및 시간
+cluster_dong_df = read.csv('./05_cluster_30min/cluster_seoul_dong_duration_distance.csv', fileEncoding = 'UTF-8')
+cluster_dong_df$EMD_CD = as.character(cluster_dong_df$EMD_CD)
+
+# duration 컬럼 단위 초임
+# duration 분 컬럼 만듬
+cluster_dong_df$dur_min = cluster_dong_df$duration / 60
+# head(cluster_dong_df)
+
+cluster_pop_df = merge(cluster_dong_df, pop_df, by.x = 'EMD_CD', by.y = 'EMD_CD')
+head(cluster_pop_df)
+
+# 30분 넘어가는 컬럼 삭제
+cluster_pop_df %>% 
+  filter(dur_min < 30) ->
+  cluster_pop_df
+
+# 20, 30, 40 대로 연령구간 합침
+cluster_pop_df$F_20 = cluster_pop_df$F_20_24 + cluster_pop_df$F_25_29
+cluster_pop_df$F_30 = cluster_pop_df$F_30_34 + cluster_pop_df$F_35_39
+cluster_pop_df$F_40 = cluster_pop_df$F_40_44 + cluster_pop_df$F_45_49
+
+cluster_pop_df$M_20 = cluster_pop_df$M_20_24 + cluster_pop_df$M_25_29
+cluster_pop_df$M_30 = cluster_pop_df$M_30_34 + cluster_pop_df$M_35_39
+cluster_pop_df$M_40 = cluster_pop_df$M_40_44 + cluster_pop_df$M_45_49
+
+cluster_pop_df$age20 = cluster_pop_df$F_20 + cluster_pop_df$M_20
+cluster_pop_df$age30 = cluster_pop_df$F_30 + cluster_pop_df$M_30
+cluster_pop_df$age40 = cluster_pop_df$F_40 + cluster_pop_df$M_40
+
+cluster_pop_df$Fe = cluster_pop_df$F_20 + cluster_pop_df$F_30 + cluster_pop_df$F_40
+cluster_pop_df$Man = cluster_pop_df$M_20 + cluster_pop_df$M_30 + cluster_pop_df$M_40
+
+cluster_pop_df$pop = cluster_pop_df$Fe + cluster_pop_df$Man
+
+
+# 필요한 컬럼만 선택
+cluster_pop_df %>% 
+  select(EMD_CD, cluster_id, age20, age30, age40, Fe, Man, pop) ->
+  cluster_pop_df
+
+cluster_pop_df %>% 
+  group_by(cluster_id) %>% 
+  summarise(age20 = sum(age20), age30 = sum(age30), age40 = sum(age40), Fe = sum(Fe), Man = sum(Man), pop = sum(pop)) ->
+  cluster_pop_df
+
+# cluster_pop_df
+
+data_df = data.frame(cluster_pop_df)
+data_df
+
+write.csv(data_df, 'GeoJuInGu_cluster_radarchar_data.csv', fileEncoding = 'UTF-8', row.names = FALSE)
+
+min_data_df = data.frame(age20 = c(min(data_df$age20)), 
+                         age30 = c(min(data_df$age30)), 
+                         age40 = c(min(data_df$age40)), 
+                         Fe = c(min(data_df$Fe)), 
+                         Man = c(min(data_df$Man)), 
+                         pop = c(min(data_df$pop)))
+                         
+max_data_df = data.frame(age20 = c(max(data_df$age20)), 
+                         age30 = c(max(data_df$age30)), 
+                         age40 = c(max(data_df$age40)), 
+                         Fe = c(max(data_df$Fe)), 
+                         Man = c(max(data_df$Man)), 
+                         pop = c(max(data_df$pop)))
+
+N_cluster = nrow(data_df)
+n = 1
+
+for (n in seq(1, N_cluster, 1)) {
+  data_n_df = data_df[n, c('age20', 'age30', 'age40', 'Fe', 'Man', 'pop')]
+  print(data_n_df)
+  
+  data_n_df = rbind(max_data_df, min_data_df, data_n_df)
+  print(data_n_df)
+
+  data_n_df = data_n_df[, c('pop', 'Fe', 'age20', 'age30', 'age40', 'Man')]
+  print(data_n_df)
+  
+  vlabels = c("인구", "여자", "20대", "30대", "40대", "남자")
+  
+  radarchart(data_n_df, axistype=1 ,
+             vlabels = vlabels,
+             #custom polygon
+             pcol=rgb(0.2,0.5,0.5,0.9) , pfcol=rgb(0.2,0.5,0.5,0.5) , plwd=4 ,
+             #custom the grid
+             cglcol="grey", cglty=1, axislabcol="grey", cglwd=0.8,
+             #custom labels
+             vlcex=0.8 ) +
+    theme(legend.text = element_text(size = 20, face = 'bold', family="NanumGothicCoding"))
+}
+```
+
+# 클러스터 n 의 정보 뽑아 내기
+- 구 이름, 동이름
+- 인구수 연령별 성별
+
+```{r warning=FALSE}
+# begin 데이터 불러오기
+# 거주인구 데이터 불러오기
+pop_df = read.csv('cleaned_bjd_pop_geoju.csv', fileEncoding = 'UTF-8')
+
+# 전국 법정동 코드 동이름
+# 출처 : https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=71566
+# 파일이름 jscode20190701.zip
+jeonkuk_dongname_df <- read.csv('./03_cleaning_address/jeonkuk_dongcode_dongname.csv', header = TRUE, fileEncoding = 'UTF-8')
+
+jeonkuk_dongname_df$bjd_code = as.character(jeonkuk_dongname_df$bjd_code)
+jeonkuk_dongname_df$si_do = as.character(jeonkuk_dongname_df$si_do)
+jeonkuk_dongname_df$gun_gu = as.character(jeonkuk_dongname_df$gun_gu)
+jeonkuk_dongname_df$myun_dong = as.character(jeonkuk_dongname_df$myun_dong)
+# head(jeonkuk_dongname_df)
+# end 데이터 불러오기
+
+
+get_cluster_info <- function(n, cluster_dong_df, jeonkuk_dongname_df, pop_df){
+  cluster_dong_df %>% 
+    filter(cluster_id == n) %>% 
+    filter(dur_min <30) ->
+    cluster_n_dong_df
+  
+  # 구이름 동이름
+  cluster_n_gudong_name_df = merge(cluster_n_dong_df, jeonkuk_dongname_df, by.x = 'EMD_CD', by.y = 'bjd_code')
+  
+  # 인구 데이터 머지
+  cluster_n_gudong_name_pop_df = merge(cluster_n_gudong_name_df, pop_df, by.x = 'EMD_CD', by.y = 'EMD_CD')
+  cluster_n_gudong_name_pop_df = cluster_n_gudong_name_pop_df[with(cluster_n_gudong_name_pop_df, order(-pop)), ]
+  
+  # 이 클러스터의 전체 정보 저장
+  f = paste0('cluster_', n, '_info_all_geoju.csv')
+  write.csv(cluster_n_gudong_name_pop_df, f, fileEncoding = 'UTF-8')
+  
+  
+  # begin 구를 기준으로 데이터를 뽑음
+  # colnames(cluster_n_gudong_name_pop_df)
+  # 컬럼 삭제하기전, 전체 컬럼이름
+  # 'EMD_CD','cluster_id','duration','distance','dur_min','si_do','gun_gu','myun_dong','dong_li','address','F_20_24','F_25_29','F_30_34','F_35_39','F_40_44','F_45_49','M_20_24','M_25_29','M_30_34','M_35_39','M_40_44','M_45_49','all_F','all_M','pop',
+  
+  cols = c('EMD_CD','cluster_id', 'gun_gu', 'all_F', 'all_M', 'pop')
+  
+  cluster_n_gudong_name_pop_df %>% 
+    select(cols) -> 
+    gu_df
+  
+  gu_df %>% 
+    group_by(gun_gu) %>% 
+    summarise(pop = sum(pop), all_F = sum(all_F), all_M = sum(all_M)) ->
+    gu_df
+  
+  # 인구수 역순으로 정렬
+  gu_df = gu_df[with(gu_df, order(-pop)), ]
+  gu_df
+  
+  f = paste0('cluster_', n, '_info_gu_geoju.csv')
+  write.csv(gu_df, f, fileEncoding = 'UTF-8')
+  # end 구를 기준으로 데이터를 뽑음
+  
+  
+  # begin 동 기준으로 데이터 뽑음
+  cols = c('EMD_CD','cluster_id', 'myun_dong', 'all_F', 'all_M', 'pop')
+  
+  cluster_n_gudong_name_pop_df %>% 
+    select(cols) -> 
+    dong_df
+  
+  dong_df %>% 
+    group_by(myun_dong) %>% 
+    summarise(pop = sum(pop), all_F = sum(all_F), all_M = sum(all_M)) ->
+    dong_df
+  
+  # 인구수 역순으로 정렬
+  dong_df = dong_df[with(dong_df, order(-pop)), ]
+  dong_df
+  
+  f = paste0('GeoJuInGu_cluster_', n, '_info_dong_geoju.csv')
+  write.csv(dong_df, f, fileEncoding = 'UTF-8')
+  # end 동 기준으로 데이터 뽑음
+}
+n = 1
+N_cluster = max(cluster_dong_df$cluster_id)
+
+for (n in seq(1, N_cluster, 1)) {
+  get_cluster_info(n, cluster_dong_df, jeonkuk_dongname_df, pop_df)
+}
+```

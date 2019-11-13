@@ -1,0 +1,428 @@
+---
+title: "Untitled"
+author: "author"
+date: '2019 9 30 '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 필요한 패키지 설치
+```{r}
+# install.packages('tidyverse')
+# install.packages('sf')
+```
+
+```{r}
+library(tidyverse)
+# select() 함수
+
+library(sf)
+# sf_read() 함수, shape file을 읽어 오는대 사용함
+
+library(ggplot2)
+```
+
+## R Markdown
+
+```{r}
+# juso.go.kr 에 가입해서, 데이터를 신청하면, SHP 파일을 제공 받을 수 있습니다.
+
+# 서울 지하철역만 불러오기
+shp <- st_read('../../SeoulBigDataCampus_Competition2019_Submission_data/subway_map/TL_SPSB_STATN.SHP')
+shp %>%
+  filter(substr(SIG_CD, 1, 2) == '11') ->
+  seoul_shp
+
+seoul_shp$KOR_SUB_NM <- iconv(seoul_shp$KOR_SUB_NM, from = "CP949", to = "UTF-8", sub = NA, mark = TRUE, toRaw = FALSE)
+head(seoul_shp)
+```
+
+```{r}
+seoul_spatial <-  as(seoul_shp, 'Spatial')
+
+seoul_data_df <- as.data.frame(seoul_spatial)
+seoul_data_df$SIG_CD = as.character(seoul_data_df$SIG_CD)
+seoul_data_df$SIG_CD = str_trim(seoul_data_df$SIG_CD, side='both')
+seoul_data_df$OPERT_DE = as.character(seoul_data_df$OPERT_DE)
+seoul_data_df$OPERT_DE = str_trim(seoul_data_df$OPERT_DE, side='both')
+seoul_data_df$SUB_STA_SN = as.integer(seoul_data_df$SUB_STA_SN)
+seoul_data_df$id <- 1:nrow(seoul_data_df)
+seoul_data_df %>%
+  select(id, SIG_CD, KOR_SUB_NM, SUB_STA_SN) ->
+  seoul_data_df
+
+head(seoul_data_df, 50)
+
+seoul_geometry_df <- fortify(seoul_spatial)
+seoul_geometry_df$id = as.integer(seoul_geometry_df$id)
+
+head(seoul_geometry_df, 50)
+```
+
+```{r fig.width = 25, fig.height = 25}
+# 역이 점으로 있지 않고, 역 면적을 가지고 있음
+# 역을 점으로 변환하기전전
+p <- ggplot(data = seoul_geometry_df, aes(x = long, y = lat, group = id)) +
+  geom_polygon(aes(group = group, fill = id)) +
+  geom_path(color = 'black', size = .5) +
+  coord_fixed(1)
+p
+```
+
+```{r}
+# shape 파일의 data와 geometry 부분 merge
+seoul_data_geometry_df = merge(seoul_data_df, seoul_geometry_df, by.x = 'id', by.y = 'id')
+# seoul_subway_df = seoul_subway_df[with(seoul_subway_df, order(id, order)), ]
+
+head(seoul_data_geometry_df, 50)
+```
+
+```{r}
+# () 괄호 안에 내용 지우기
+# 공덕역(5호선) -> 공덕역
+seoul_data_geometry_df %>% 
+  mutate(KOR_SUB_NM = str_replace(KOR_SUB_NM, '\\(.+\\)', '')) ->
+  seoul_data_geometry_df
+
+# 역면적을 평균내서, 점으로 만듬
+seoul_data_geometry_df %>%
+  group_by(id, SIG_CD, KOR_SUB_NM, SUB_STA_SN) %>%
+  summarise(long = mean(long), lat = mean(lat)) ->
+  seoul_subway_name_pos
+
+# 필요한 컬럼만 남김
+seoul_subway_name_pos %>% 
+  select(KOR_SUB_NM, long, lat) -> 
+  seoul_subway_name_pos
+
+# 서울역 같은 경우 4개 노선의 역이 '서울역'으로 4개의 역사가 있음
+# group_by 해서 한 역으로 만들고, 위치는 평균낸다
+seoul_subway_name_pos %>%
+  group_by(KOR_SUB_NM) %>%
+  summarise(long = mean(long), lat = mean(lat)) ->
+  seoul_subway_name_pos
+
+# 역이름 바뀐지 꽤 되었음 -_-?
+# 성북역 -> 광운대역 이름 변경
+# https://ko.wikipedia.org/wiki/%EA%B4%91%EC%9A%B4%EB%8C%80%EC%97%AD
+seoul_subway_name_pos %>% 
+  mutate(KOR_SUB_NM = replace(KOR_SUB_NM, KOR_SUB_NM == '성북역', '광운대역')) ->
+  seoul_subway_name_pos
+
+seoul_subway_name_pos %>% 
+  mutate(KOR_SUB_NM = replace(KOR_SUB_NM, KOR_SUB_NM == '개농역', '개롱역')) ->
+  seoul_subway_name_pos
+
+seoul_subway_name_pos %>% 
+  mutate(KOR_SUB_NM = replace(KOR_SUB_NM, KOR_SUB_NM == '한양대입구역', '한양대역')) ->
+  seoul_subway_name_pos
+
+seoul_subway_name_pos %>% 
+  mutate(KOR_SUB_NM = replace(KOR_SUB_NM, KOR_SUB_NM == '대모산입구', '대모산입구역')) ->
+  seoul_subway_name_pos
+
+# 4.19 중간에 이상한 점이, 코드로는 입력이 안되서, csv에서 매뉴얼로 지움
+#seoul_subway_name_pos %>% 
+#  mutate(KOR_SUB_NM = replace(KOR_SUB_NM, KOR_SUB_NM == '4.19민주묘지역', '4·19민주묘지역')) ->
+#  seoul_subway_name_pos
+
+# '수색역 ' <- 끝에 빈칸 있음
+# 역이름 앞뒤로, 빈칸을 지움
+seoul_subway_name_pos$KOR_SUB_NM = str_trim(seoul_subway_name_pos$KOR_SUB_NM, side='both')
+
+seoul_subway_name_pos <- seoul_subway_name_pos[ with(seoul_subway_name_pos, order(KOR_SUB_NM)),]
+
+seoul_subway_name_pos %>%
+  group_by(KOR_SUB_NM) %>%
+  summarise(long = mean(long), lat = mean(lat)) ->
+  seoul_subway_name_pos
+
+seoul_subway_name_pos
+
+write.csv(seoul_subway_name_pos, 'seoul_subway_name_pos.csv', fileEncoding = 'UTF-8', row.names=FALSE)
+```
+```{r fig.width = 25, fig.height = 25}
+# regular expression 사용해서, () 괄호 안에 있는 문자열 삭제
+a = "공덕역(5호선)"
+b = "광흥창(서강)역"    
+
+aa = str_replace(a, '\\(.+\\)', '')
+aa
+
+bb = str_replace(b, '\\(.+\\)', '')
+bb
+```
+
+```{r fig.width = 25, fig.height = 25}
+# 지하철역 클리닝한 데이터로 역위치에 역이름 표시
+seoul_subway_name_pos = read.csv('seoul_subway_name_pos.csv', fileEncoding = 'UTF-8', header = TRUE)
+
+p <- ggplot(data = seoul_subway_name_pos, aes(x = long, y = lat)) +
+  # geom_point(color = 'blue', size = 2) +
+  geom_text(aes(label = KOR_SUB_NM), data = seoul_subway_name_pos, size = 6) +
+  coord_fixed(1)
+p
+
+seoul_subway_name_pos
+```
+
+```{r}
+# http://data.seoul.go.kr/dataList/datasetView.do?infId=OA-15442&srvType=S&serviceKind=1&currentPageNo=1
+# 서울특별시 노선별 지하철역 정보(신규).csv -> ori_seoul_subway_station.csv 파일명 변경
+
+#TODO
+# 환승역인 경우, 몇개 노선을 환승할 수 있는지 lines 컬럼에 저장
+
+#seoul_subway_station.csv
+seoul_subway_station_df = read.csv('../../SeoulBigDataCampus_Competition2019_Submission_data/subway_station_name/ori_seoul_subway_station.csv', fileEncoding = 'UTF-8')
+names(seoul_subway_station_df)[1] <- 'subway_station_code'
+names(seoul_subway_station_df)[2] <- 'subway_station_name'
+names(seoul_subway_station_df)[3] <- 'subway_station_name_english'
+names(seoul_subway_station_df)[4] <- 'subway_line_number'
+names(seoul_subway_station_df)[5] <- 'external_code'
+seoul_subway_station_df %>%
+  select("subway_station_code", "subway_station_name", "subway_line_number") ->
+  seoul_subway_station_df
+
+head(seoul_subway_station_df)
+```
+
+```{r}
+# 고속터미널역 3개 지하철노선 3,7,9호선 환승역
+# 고속터미널 이름으로 역이 3개 있음
+seoul_subway_station_df %>% 
+  filter(subway_station_name == '고속터미널')
+```
+
+```{r}
+# TODO
+# 환승역에서 환승할 수 있는 지하철 노선수를 구하자
+
+# lines컬럼에 지하철 노선수를 저장함
+seoul_subway_station_df$lines = 1
+
+p <- function(v) {
+  Reduce(f=paste, x = v)
+}
+
+# 역이름, 노선수, 노선 설명 3개 컬럼만 선택
+seoul_subway_station_df %>% 
+  select(subway_station_name, lines, subway_line_number) ->
+  seoul_subway_station_df
+
+# 역이름 기준 group_by 해서, lines에 노선수가 저장, 노선 설명도 합침
+seoul_subway_station_df %>% 
+  group_by(subway_station_name) %>% 
+  summarise(lines = sum(lines), subway_line_number = p(as.character(subway_line_number))) ->
+  seoul_subway_station_df
+
+seoul_subway_station_df$subway_station_name = paste0(seoul_subway_station_df$subway_station_name,'역')
+
+# 서울역만 끝에 '역' 붙어 있음
+seoul_subway_station_df %>% 
+  mutate(subway_station_name = replace(subway_station_name, subway_station_name == '서울역역', '서울역')) ->
+  seoul_subway_station_df
+
+seoul_subway_station_df %>% 
+  mutate(subway_station_name = replace(subway_station_name, subway_station_name == '4·19민주묘지역', '4.19민주묘지역')) ->
+  seoul_subway_station_df
+
+seoul_subway_station_df
+```
+
+```{r}
+write.csv(seoul_subway_station_df, 'seoul_subway_name_and_lines.csv', fileEncoding = 'UTF-8', row.names=FALSE)
+```
+
+```{r}
+seoul_subway_name_pos_df = read.csv('seoul_subway_name_pos.csv', fileEncoding = 'UTF-8', header = TRUE)
+seoul_subway_station_df = read.csv('seoul_subway_name_and_lines.csv', fileEncoding = 'UTF-8', header = TRUE)
+seoul_subway_name_pos_df
+seoul_subway_station_df
+```
+
+```{r fig.width = 25, fig.height = 25}
+seoul_subway_df = merge(seoul_subway_name_pos_df, seoul_subway_station_df, by.x = 'KOR_SUB_NM', by.y = 'subway_station_name')
+
+head(seoul_subway_df, 50)
+```
+
+```{r fig.width = 25, fig.height = 25}
+# 지하철역을 파란색 동그라미로 표시
+# 파란색 동그라미의 크기가, 환승노선 수
+# cf. 고속터미널역은 3개 노선이 환승 동그라미 크기 3
+p <- ggplot(data = seoul_subway_df, aes(x = long, y = lat)) +
+  geom_point(color = 'blue', aes(size = lines)) +
+  geom_text(aes(label = KOR_SUB_NM), data = seoul_subway_name_pos, size = 6) +
+  coord_fixed(1)
+p
+```
+
+```{r}
+# lines > 1, 즉 환승역만 모음
+# 역수 74개
+seoul_subway_df %>% 
+  filter(lines > 1) ->
+  multiple_lines_seoul_subway_df
+
+multiple_lines_seoul_subway_df
+```
+
+```{r}
+# K-means 를 사용해서, 환승역들을 클러스터링함
+
+# seed 고정
+# set.seed(20191011) # 저장 랜덤시드 #1
+# set.seed(20191012) #x
+# set.seed(749) #x
+# set.seed(77) #x
+#set.seed(108) #2
+#set.seed(1004) # 랜덤시드 1004로 고정
+set.seed(60) #이거로 위에3개 아래 3개 ^^
+
+df = multiple_lines_seoul_subway_df
+
+# 6은 6개 그룹으로 클러스터링
+statn_k_means <- kmeans(df[,c("long", "lat")], 6) 
+statn_k_means
+
+# row 순서로, 각 row가 어느 클러스터에 속하는지 숫자로 나타냄
+# cluster를 다른 df와 megre하기 위해서, dataframe 으로 변환
+cluster = statn_k_means$cluster
+
+cluster_df <- as.data.frame(cluster)
+cluster_df
+
+# cluster_df 와 머지
+multiple_lines_seoul_subway_cluster_df = cbind(multiple_lines_seoul_subway_df, cluster_df)
+multiple_lines_seoul_subway_cluster_df
+write.csv(multiple_lines_seoul_subway_cluster_df, 'multiple_lines_seoul_subway_cluster.csv', fileEncoding = 'UTF-8', row.names = FALSE)
+```
+
+```{r}
+# 각 클러스터의 center 저장
+center = statn_k_means$centers
+center_df <- as.data.frame(center)
+
+# 나중에 cluster_id 값이 머지할 때 사용함
+center_df$cluster_id = rownames(center_df)
+
+# long,lat는 컬럼이름으로 이미 사용되고 있어서, long, lat에 center_ 붙여줌
+names(center_df) = c('center_long', 'center_lat', 'cluster_id')
+head(center_df)
+
+# cluster_id가 앞으로 오는개 보기 좋아서, 컬럼의 순서를 변경
+# center_df = center_df[c(3,1,2)]
+# center_df
+write.csv(center_df, 'cluster_center.csv', fileEncoding = 'UTF-8', row.names = FALSE)
+```
+
+```{r fig.width = 25, fig.height = 25}
+library(RColorBrewer)
+library(ggforce) # geom_circle()
+
+seoul_map_df = read.csv('../02_cleaning_map_data/cleaned_seoul_map.csv')
+seoul_map_df$EMD_CD = as.character(seoul_map_df$EMD_CD)
+seoul_map_df$long = as.integer(seoul_map_df$long)
+seoul_map_df$lat = as.integer(seoul_map_df$lat)
+
+# head(seoul_map_df)
+
+# 환승역 컬러  
+N_cluster = nrow(cluster_center_df)
+cluster_id = seq(1, N_cluster, by=1)
+mycolors = brewer.pal(n = N_cluster, name = "Dark2")
+  
+color_df = data.frame(cluster_id, mycolors)
+color_df$mycolors = as.character(color_df$mycolors)
+
+subway_df = merge(multiple_lines_seoul_subway_cluster_df, color_df, by.x = 'cluster', by.y = 'cluster_id')
+head(subway_df)
+cluster_center_df = merge(center_df, color_df, by.x = 'cluster_id', by.y = 'cluster_id')
+head(cluster_center_df)
+
+#   d1 = 10*15
+#   r2 = 100 * 10
+# 
+# p <- ggplot(data = subway_df, aes(x = long, y = lat)) +
+#       geom_rect(data = subway_df, color = 'black', fill = subway_df$c2,
+#               aes(x = long, y = lat,
+#                   xmin = long-d1, xmax = long+d1,
+#                   ymin = lat-d1, ymax = lat+d1),
+#               inherit.aes = FALSE
+#               ) +
+#     geom_circle(data = center_df, fill = center_df$c2,
+#                 aes(x0 = center_long, y0 = center_lat, r = r2),
+#                 inherit.aes = FALSE) +
+#   coord_fixed(1)
+# p
+
+draw_map_cluster <- function(map_df, s_df, c_df) {
+  d1 = 10*15
+  r2 = 100 * 30
+  
+  t1 = 5
+  
+  # print(nrow(c_df))
+  # print(c_df$mycolors)
+  
+  p <- ggplot(inherit.aes = FALSE) +
+    geom_path(data = map_df, color = 'black',
+              aes(x = long, y = lat, group = id),
+              size = .5,
+              alpha = 0.25) +
+    geom_rect(data = s_df,
+              fill = s_df$mycolors,
+              size = t1,
+              aes(x = long, y = lat,
+                  xmin = long-d1, xmax = long+d1,
+                  ymin = lat-d1, ymax = lat+d1),
+              # inherit.aes = FALSE,
+              alpha = 0.5)
+    # geom_circle(data = c_df,
+    #             # color = a_center_df$mycolors,
+    #             fill = c_df$mycolors,
+    #             aes(x0 = center_long, y0 = center_lat,
+    #                 r = r2),
+    #             # linetype = 'blank',
+    #             inherit.aes = FALSE,
+    #             alpha = 0.5) +
+    # coord_fixed(1)
+      
+  N_cluster = nrow(c_df)
+  l = unique(c_df$cluster_id)
+  # for(n in seq(1, N_cluster, 1)){
+  for(n in l){
+    print(n)
+    c_df %>%
+      filter(cluster_id == n) ->
+      one_c_df
+    print(one_c_df)
+    p_circle = geom_circle(data = one_c_df,
+                           # color = a_center_df$mycolors,
+                           fill = one_c_df$mycolors,
+                           aes(x0 = center_long, y0 = center_lat,
+                               r = r2),
+                           linetype = 'blank',
+                           inherit.aes = FALSE,
+                           alpha = 0.5)
+    p = p + p_circle
+  }
+  p = p + coord_fixed(1)
+
+  return(p)
+}
+
+p = draw_map_cluster(seoul_map_df, subway_df, cluster_center_df)
+p
+```
+
+
+```{r}
+```
+
+```{r}
+```

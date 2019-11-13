@@ -1,0 +1,692 @@
+---
+title: "title"
+author: "author"
+date: '2019 9 11 '
+output: html_document
+---
+
+# Data Gatering 첫번째
+
+분석에 필요한 데이터를 NPS에서 부터 OpenAPI로 받아 보겠습니다.
+각 동별, 나이, 성별, 인원수를 알아야 하는데데요, 전체 데이터를 받아 보기 전에, 한동의 데이터만 일부 받아 보겠습니다.
+
+여기서는 한 동만 받아 보겠습니다. 샘플로 사용할 한동의 법정동 코드를 불러옵니다.
+코드에서 사용된 CSV파일은 아래 링크 참고하세요. 해당 링크에서 만들어 지는 CSV파일입니다.
+ * https://github.com/skysign/drawing_south_korea_map_in_R
+
+```{r}
+dong_df = read.csv('../SeoulBigDataCampus_Competition2019_Submission_data/NPS/south_korea_dong_code_201905.csv')
+dong_df = transform(dong_df, 
+                    EMD_CD = as.character(EMD_CD))
+dong_df = transform(dong_df, 
+                    EMD_ENG_NM = as.character(EMD_ENG_NM))
+dong_df = transform(dong_df, 
+                    EMD_KOR_NM = as.character(EMD_KOR_NM))
+head(dong_df)
+```
+
+법정동 코드, 1111010100 청운동을 샘플로 한개 동만 데이터를 받아 오는 함수를 작성해 보겠습니다.
+
+## 다 받아 오기 전에, 한건만 먼저 받기
+
+국민연금 가입현황 OpenAPI에 연결해서, 데이터를 받아 올 함수 입니다.
+데이터를 받아 오는대 필요한, 국민연금 가입현황 OpenAPI사용법은 아래 링크 참고하세요.
+ * https://github.com/skysign/example_korea_NPS_openapi
+
+```{r}
+library(httr)
+
+NP_getSbscrbSttusInfoSearch <- function(bjd_code,
+                                        age,
+                                        sex,
+                                        clss,
+                                        key) {
+  myurl = 'http://apis.data.go.kr/B552015/NpsSbscrbInfoProvdService/getSbscrbSttusInfoSearch'
+
+  res <- httr::GET(
+    url = myurl,
+    accept_xml(), # xml 포맷으로 받을 때
+    # accept_json(), json 포맷으로 받을 때
+    query = list(
+      ldong_addr_mgpl_dg_cd = substring(bjd_code, 1, 2),
+      ldong_addr_mgpl_sggu_cd = substring(bjd_code, 1, 5),
+      ldong_addr_mgpl_sggu_emd_cd = substring(bjd_code, 1, 8),
+      jnngp_age = age,
+      sex_dvcd = sex,
+      jnng_brkd_jnngp_clss_cd = clss,
+      serviceKey = key
+    )
+  )
+  
+  return(httr::content(res, as = 'text', encoding = 'UTF-8'))
+}
+```
+
+OpenAPI사용을 위한 키를 불러 옵니다.
+
+```{r}
+NPS_key = readLines('../../SeoulBigDataCampus_Competition2019_Submission_data/NPS/NPS_openapi_key.private')
+```
+
+함수 동작을 확인해 보기 위해서, 임의의 값으로 한번 호출 해 봅니다.
+* 법정동 코드 1111010100 : 서울시 종로구 청운동
+* 나이 28세
+* 성별 남자
+* clss 0 현재 직장에 근무하며, 국민연금을 납부하고 있는 사람
+ * (0번 이외에, 그외에 '임의 가입'등 직장에 근무하지 않으면, 가입하는 방법들이 있습니다. )
+ * clss 에 관해서는 아래 파일 참고하세요.
+  * IROS5_OA_DV_0401_OpenAPI활용가이드_국민연금가입통계정보서비스_국민연금공단__v1.0.docx
+```{r}
+bjd_code = '1111010100'
+age = 28
+sex = 'M'
+clss = 0
+
+res = NP_getSbscrbSttusInfoSearch(bjd_code, age, sex, clss, NPS_key)
+res
+```
+
+## 받아온 데이터 파싱하기기
+
+필요한 패키지 설치하기, strcmp()를 쓰기 위해서, 따로 패키지를 설치합니다.
+
+```{r}
+install.packages('pracma')
+# strcmp()
+```
+
+받아온 res를 파싱 하기 위한 함수로 get_number_of_people()를 작성했습니다.
+* 에러가 날 때를 대비해서, 각 노드가 존재하는지, is.null()로 체크 했습니다. 
+* 노드의 값을 체크 하기위해서, strcmp()를 사용합니다.
+* 에러일 때는 음수를 리턴합니다.
+* 에러가 없으면, jnngBrkdSgmntPrsnCnt노드의 값 '가입내역구간인원수'를 숫자로 리턴합니다.
+ 
+```{r}
+library(XML)
+library(pracma)
+
+get_number_of_people <- function(res)
+{
+  xmlResult <- xmlParse(res)
+  xmlRoot = xmlRoot(xmlResult)
+  xmlRoot
+
+  # xPath_resultCode = '/response/header/sgwetse/text()'
+  # node = xpathApply(xmlRoot, xPath_resultCode)
+  # v = node
+  # print(node)
+  # if (is.null(v)) {
+  #   print('node X')
+  #   return(-1)    
+  # }
+
+  xPath_resultCode = '/response/header/resultCode/text()'
+  node = xpathApply(xmlRoot, xPath_resultCode)
+  if (is.null(node))
+    return(-5)
+
+  v = node[[1]]
+  ## 00  
+  v = xmlValue(v)
+  # print('00')
+  if (!strcmp(v, '00'))
+    return(-51)
+  
+  xPath_resultMsg = '/response/header/resultMsg/text()'
+  node = xpathApply(xmlRoot, xPath_resultMsg)
+  if (is.null(node))
+    return(-6)
+  
+  v = node[[1]]
+  v = xmlValue(v)
+  ## NORMAL SERVICE.  
+  if (!strcmp(v, 'NORMAL SERVICE.'))
+    return(-72)
+  
+  xPath_jnngBrkdSgmntPrsnCnt = '/response/body/item/jnngBrkdSgmntPrsnCnt/text()'
+  node = xpathApply(xmlRoot, xPath_jnngBrkdSgmntPrsnCnt)
+  if (is.null(node))
+    return(-1)
+  
+  rtn = xmlValue(node[[1]])
+  rtn = as.integer(rtn)
+  return(rtn)
+}
+
+rtn = get_number_of_people(res)
+rtn
+class(rtn)
+```
+
+## 한동의 20~49세 남자 데이터 받기
+
+20세 부터 49세 까지, 남자, 데이터를 받아서 데이터 프레임으로 리턴합니다.
+
+```{r}
+bjd_code = '1111010100'
+# age = 28
+sex = 'M'
+clss = 0
+# 
+# res = NP_getSbscrbSttusInfoSearch(bjd_code, age, sex, clss, NPS_key)
+# res
+
+get_NPS_age_sex_clss <- function(bjd_code,
+                                 age_begin, age_end,
+                                 sex, clss, NPS_key) {
+  rtn_df = NULL
+  
+  for(n in age_begin:age_end) {
+    # print(bjd_code)
+    # print(n)
+    # print(sex)
+    # print(clss)
+    res = NP_getSbscrbSttusInfoSearch(bjd_code, n, sex, clss, NPS_key)
+    
+    rtn = get_number_of_people(res)
+    if (rtn < -1) {
+      print('X')      
+      print(rtn)
+      return(NULL)
+      break
+    }
+    else{
+      number = rtn
+      
+      if(is.null(rtn_df)){
+        rtn_df = data.frame(EMD_CD = c(bjd_code), age = c(n), sex=c(sex), clss=c(clss), number=c(number))
+      }
+      else {
+        add_df = data.frame(EMD_CD = c(bjd_code), age = c(n), sex=c(sex), clss=c(clss), number=c(number))
+        rtn_df = rbind(rtn_df, add_df)        
+      }
+    }
+  }
+  
+  rtn_df = transform(rtn_df, EMD_CD = as.character(EMD_CD))
+  rtn_df = transform(rtn_df, sex = as.character(sex))
+  rtn_df = transform(rtn_df, clss = as.integer(clss))
+  rtn_df = transform(rtn_df, number = as.integer(number))
+  
+  return(rtn_df)
+}
+
+age_begin = 20
+age_end = 49
+
+df = get_NPS_age_sex_clss(bjd_code,
+                     age_begin, age_end,
+                     sex = 'M', clss = 0,
+                     NPS_key)
+df
+```
+
+# 서울시에는 몇개의 동이 있을까? 얼마나 걸릴지 가늠해보자
+
+서울특별시에 있는 동의 수만 추려 보겠습니다.
+
+```{r}
+# install.packages('psych')
+# describe() 함수수
+```
+
+```{r}
+library(psych)
+library(dplyr)
+
+dong_df %>% filter(substr(EMD_CD, 1, 2) == '11') -> dong_seoul_df
+
+describe(dong_df)
+describe(dong_seoul_df)
+head(dong_seoul_df)
+```
+
+전국의 동개수는 5047개이고, 서울 특별시에 속해있는 동의 갯수는 467개 입니다.
+
+서울에 있는 동의 수 : 467개
+나이의 범위 : 20~49 (갯수로 30)
+성별 : M/F 갯수로 2
+
+OpenAPI호출 횟수 : 2만 8천번
+
+```{r}
+467 * 30 * 2
+```
+
+## 다운받는대 걸리는 시간은 예측
+
+서울시 종로구에 속해 있는 동만 분리해서, 데이터를 다운로드 하는대 걸리는 시간을 예상해 보도록 하겠습니다.
+총 87개 동이 서울시 종로구에 속해 있습니다. 남자 데이터만 받아서, CSV로 저장해봤는데, 걸린 시간은 약 220초 입니다.
+생각보다 시간이 얼마 안걸리네요.
+
+```{r}
+printf <- function(...) invisible(print(sprintf(...)))
+
+dong_df %>% filter(substr(EMD_CD, 1, 5) == '11110') -> dong_11110_df
+
+# describe(dong_11110_df)
+# dong_11110_df
+
+tmp_func <- function() {
+  filename = 'dong_age_sex_clss_number.csv'
+  cnt = 1
+  for(bjd_code in dong_11110_df$EMD_CD) {
+    printf("%d %s", cnt, bjd_code)
+    cnt = cnt+1
+    
+    age_begin = 20
+    age_end = 49
+    
+    df = get_NPS_age_sex_clss(bjd_code,
+                         age_begin, age_end,
+                         sex = 'M', clss = 0,
+                         NPS_key)
+    write.table(df, filename, sep = ',', col.names = !file.exists(filename), append = TRUE, fileEncoding = 'UTF-8')
+    # df    
+  }
+}
+
+system.time(tmp_func())
+```
+
+## 트래픽 제한, 나눠서 다운로드 받기기
+
+국민연금 가입현황 OpenAPI는 일일 트래픽이 10000건으로 제한 되어 있는습니다.
+전체 트래픽은 약 2만 8천 건으로, 3일에 걸처서 나눠서 받아야 합니다.
+앞에서 계산한 것과 같이 3개의 그룹으로 분리 해서, 하루에 한 그룹씩 다운 받아야 합니다.
+여기서는 r1, r2, r3로 나눠서 받겠습니다.
+
+```{r}
+r = split(dong_seoul_df, cut(dong_seoul_df$id, seq(0, nrow(dong_seoul_df), length.out=4)))
+r1 = r$`(0,156]`
+r2 = r$`(156,311]`
+r3 = r$`(311,467]`
+
+head(r1)
+tail(r1)
+head(r2)
+tail(r2)
+head(r3)
+tail(r3)
+```
+
+## 각 그룹별 다운 받아서 저장할 함수
+
+r1, r2, r3 데이터 프레임을 파라미터로 받아서, 연령별 인구수를 다운 받아줄 함수 입니다.
+
+```{r }
+printf <- function(...) invisible(print(sprintf(...)))
+
+# dong_df %>% filter(substr(EMD_CD, 1, 5) == '11110') -> dong_11110_df
+# describe(dong_11110_df)
+# dong_11110_df
+
+download_NPS <- function(df) {
+  filename = 'dong_age_sex_clss_number.csv'
+  cnt = 1
+  for(bjd_code in df$EMD_CD) {
+    printf("%d %s", cnt, bjd_code)
+    cnt = cnt+1
+    
+    age_begin = 20
+    age_end = 49
+    
+    # 남자
+    df = get_NPS_age_sex_clss(bjd_code,
+                         age_begin, age_end,
+                         sex = 'M', clss = 0,
+                         NPS_key)
+    if (!is.null(df)) {
+      write.table(df, filename, sep = ',', col.names = !file.exists(filename), append = TRUE, fileEncoding = 'UTF-8', row.names = FALSE)
+    }
+    else {
+      return(-1)
+    }
+    
+    # 여자
+    df = get_NPS_age_sex_clss(bjd_code,
+                         age_begin, age_end,
+                         sex = 'F', clss = 0,
+                         NPS_key)
+    if (!is.null(df)) {
+      write.table(df, filename, sep = ',', col.names = !file.exists(filename), append = TRUE, fileEncoding = 'UTF-8', row.names = FALSE)
+    }
+    else {
+      return(-1)
+    }
+  }
+}
+```
+
+```{r download_r1}
+system.time(download_NPS(r1))
+```
+
+```{r}
+# system.time(download_NPS(r2))
+```
+
+```{r}
+# system.time(download_NPS(r3))
+```
+
+### 많이 받아 보니 에러가? 디버깅은?
+
+각 동별로 60회 API를 호출해야 합니다. download_r1 코드를 실행 해 보니, 간간히 -5 에러가 납니다. 이런 경우 디버깅을 위해서 로깅을 해야 합니다.
+먼저 로깅을 위해서 logging 패키지를 사용해 보겠습니다.
+```{r}
+install.packages('logging')
+```
+
+```{r}
+library(logging)
+
+basicConfig()
+basicConfig(level='FINEST')
+addHandler(writeToFile, file="download_r1.log", level='FINEST')
+with(getLogger(), names(handlers))
+logdebug('test %d', 2)
+
+log <- function(...) invisible(logdebug(...))
+log('log function %d', 2)
+```
+
+로깅이 준비 되었으니, get_NPS_age_sex_clss() 함수를 수정해서, 디버그 로그를 추가해 보도록 하겠습니다.
+
+```{r}
+bjd_code = '1111010100'
+# age = 28
+sex = 'M'
+clss = 0
+# 
+# res = NP_getSbscrbSttusInfoSearch(bjd_code, age, sex, clss, NPS_key)
+# res
+
+get_NPS_age_sex_clss <- function(bjd_code,
+                                 age_begin, age_end,
+                                 sex, clss, NPS_key) {
+  rtn_df = NULL
+  
+  for(n in age_begin:age_end) {
+    res = NP_getSbscrbSttusInfoSearch(bjd_code, n, sex, clss, NPS_key)
+    
+    rtn = get_number_of_people(res)
+    if (rtn < -1) {
+      log("return(%d) from get_number_of_people", rtn)
+      log("NP_getSbscrbSttusInfoSearch parameters bjd_code(%s), n(%d), sex(%s), clss(%d)", bjd_code, n, sex, clss)
+      log("dump res : %s", res)
+      return(NULL)
+      break
+    }
+    else{
+      number = rtn
+      log("return(%d) from get_number_of_people", rtn)
+      log("NP_getSbscrbSttusInfoSearch parameters bjd_code(%s), n(%d), sex(%s), clss(%d)", bjd_code, n, sex, clss)
+      
+      if(is.null(rtn_df)){
+        rtn_df = data.frame(EMD_CD = c(bjd_code), age = c(n), sex=c(sex), clss=c(clss), number=c(number))
+      }
+      else {
+        add_df = data.frame(EMD_CD = c(bjd_code), age = c(n), sex=c(sex), clss=c(clss), number=c(number))
+        rtn_df = rbind(rtn_df, add_df)        
+      }
+    }
+  }
+  
+  rtn_df = transform(rtn_df, EMD_CD = as.character(EMD_CD))
+  rtn_df = transform(rtn_df, sex = as.character(sex))
+  rtn_df = transform(rtn_df, clss = as.integer(clss))
+  rtn_df = transform(rtn_df, number = as.integer(number))
+  
+  return(rtn_df)
+}
+
+age_begin = 20
+age_end = 49
+
+df = get_NPS_age_sex_clss(bjd_code,
+                     age_begin, age_end,
+                     sex = 'M', clss = 0,
+                     NPS_key)
+df
+```
+
+download_NPS()함수에서 printf사용하던 부분도 log() 함수로 변경합니다.
+* write.table()에 row.names을 FALSE 해서, 앞에 인덱스 붙는 부분을 제거 합니다.
+
+```{r }
+download_NPS <- function(df) {
+  filename = 'dong_age_sex_clss_number.csv'
+  cnt = 1
+  for(bjd_code in df$EMD_CD) {
+    log("%d %s", cnt, bjd_code)
+    cnt = cnt+1
+    
+    age_begin = 20
+    age_end = 49
+    
+    # 남자
+    df = get_NPS_age_sex_clss(bjd_code, age_begin, age_end, sex = 'M', clss = 0, NPS_key)
+    if (!is.null(df)) {
+      write.table(df, filename, sep = ',', col.names = !file.exists(filename), append = TRUE, fileEncoding = 'UTF-8', row.names = FALSE)
+    }
+    else {
+      return(-1)
+    }
+    
+    # 여자
+    df = get_NPS_age_sex_clss(bjd_code, age_begin, age_end, sex = 'F', clss = 0, NPS_key)
+    if (!is.null(df)) {
+      write.table(df, filename, sep = ',', col.names = !file.exists(filename), append = TRUE, fileEncoding = 'UTF-8', row.names = FALSE)
+    }
+    else {
+      return(-1)
+    }
+  }
+}
+```
+
+### 함수에 로그도 추가했고, 다시 받자
+
+로그도 잘 추가 했고, 다시 받아 보겠습니다.
+
+```{r download_r1}
+system.time(download_NPS(r1))
+```
+
+어제 저녁에 할 때는 이런 에러가 없었는대, 아래와 같이 '인증서비스 내부 오류...' 라고 나오네요. - -;
+```
+[1] "1 1111018700"
+appending column names to file[1] "return(-5) from get_number_of_people"
+[1] "NP_getSbscrbSttusInfoSearch parameters bjd_code(1111010100), n(30), sex(F), clss(0)"
+[1] "dump res : <OpenAPI_ServiceResponse>\n\t<cmmMsgHeader>\n\t\t<returnCode>500</returnCode>\n\t\t<errMsg>인증서비스 내부 오류...</errMsg>\n\t</cmmMsgHeader>\n</OpenAPI_ServiceResponse>"
+ 사용자  시스템 elapsed 
+   0.58    0.02    2.41 
+```
+
+다시 시도해도 똑같은 에러가 나오는지 확인해 보겠습니다. 다시 시도 했을 때에는, 정상동작 합니다.
+
+
+```{r}
+bjd_code = '1111010400'
+age = 30
+sex = 'F'
+clss = 0
+
+res = NP_getSbscrbSttusInfoSearch(bjd_code, age, sex, clss, NPS_key)
+res
+```
+```
+"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><response><header><resultCode>00</resultCode><resultMsg>NORMAL SERVICE.</resultMsg></header><body/></response>"
+```
+
+한번 에러가 나면, 한번 retry를 하도록 함수 수정해 보겠습니다.
+
+```{r}
+library(XML)
+library(httr)
+library(pracma)
+
+NP_getSbscrbSttusInfoSearch <- function(bjd_code,
+                                        age,
+                                        sex,
+                                        clss,
+                                        key) {
+  myurl = 'http://apis.data.go.kr/B552015/NpsSbscrbInfoProvdService/getSbscrbSttusInfoSearch'
+
+  res <- httr::GET(
+    url = myurl,
+    accept_xml(), # xml 포맷으로 받을 때
+    # accept_json(), json 포맷으로 받을 때
+    query = list(
+      ldong_addr_mgpl_dg_cd = substring(bjd_code, 1, 2),
+      ldong_addr_mgpl_sggu_cd = substring(bjd_code, 1, 5),
+      ldong_addr_mgpl_sggu_emd_cd = substring(bjd_code, 1, 8),
+      jnngp_age = age,
+      sex_dvcd = sex,
+      jnng_brkd_jnngp_clss_cd = clss,
+      serviceKey = key
+    )
+  )
+  
+  res = httr::content(res, as = 'text', encoding = 'UTF-8')
+  rtn = get_number_of_people(res)
+  if (rtn < -1) {
+    log("Retry NP_getSbscrbSttusInfoSearch parameters bjd_code(%s), age(%d), sex(%s), clss(%d) res:%s", bjd_code, age, sex, clss, res)
+    res <- httr::GET( url = myurl,
+                      accept_xml(), # xml 포맷으로 받을 때
+                      # accept_json(), json 포맷으로 받을 때
+                      query = list(
+                        ldong_addr_mgpl_dg_cd = substring(bjd_code, 1, 2),
+                        ldong_addr_mgpl_sggu_cd = substring(bjd_code, 1, 5),
+                        ldong_addr_mgpl_sggu_emd_cd = substring(bjd_code, 1, 8),
+                        jnngp_age = age,
+                        sex_dvcd = sex,
+                        jnng_brkd_jnngp_clss_cd = clss,
+                        serviceKey = key)
+                    )
+    res = httr::content(res, as = 'text', encoding = 'UTF-8')
+  }
+  
+  return(res)
+}
+
+get_NPS_age_sex_clss <- function(bjd_code,
+                                 age_begin, age_end,
+                                 sex, clss, NPS_key) {
+  rtn_df = NULL
+  
+  for(n in age_begin:age_end) {
+    res = NP_getSbscrbSttusInfoSearch(bjd_code, n, sex, clss, NPS_key)
+    
+    rtn = get_number_of_people(res)
+    if (rtn < -1) {
+      log("return(%d) from get_number_of_people", rtn)
+      log("NP_getSbscrbSttusInfoSearch parameters bjd_code(%s), n(%d), sex(%s), clss(%d)", bjd_code, n, sex, clss)
+      log("dump res : %s", res)
+      return(NULL)
+      break
+    }
+    else{
+      number = rtn
+      log("return(%d) from get_number_of_people", rtn)
+      log("NP_getSbscrbSttusInfoSearch parameters bjd_code(%s), n(%d), sex(%s), clss(%d)", bjd_code, n, sex, clss)
+      
+      if(is.null(rtn_df)){
+        rtn_df = data.frame(EMD_CD = c(bjd_code), age = c(n), sex=c(sex), clss=c(clss), number=c(number))
+      }
+      else {
+        add_df = data.frame(EMD_CD = c(bjd_code), age = c(n), sex=c(sex), clss=c(clss), number=c(number))
+        rtn_df = rbind(rtn_df, add_df)        
+      }
+    }
+  }
+  
+  rtn_df = transform(rtn_df, EMD_CD = as.character(EMD_CD))
+  rtn_df = transform(rtn_df, sex = as.character(sex))
+  rtn_df = transform(rtn_df, clss = as.integer(clss))
+  rtn_df = transform(rtn_df, number = as.integer(number))
+  
+  return(rtn_df)
+}
+
+download_NPS <- function(df) {
+  filename = 'dong_age_sex_clss_number.csv'
+  cnt = 1
+  for(bjd_code in df$EMD_CD) {
+    log("%d %s", cnt, bjd_code)
+    cnt = cnt+1
+    
+    age_begin = 20
+    age_end = 49
+    
+    # 남자
+    df = get_NPS_age_sex_clss(bjd_code, age_begin, age_end, sex = 'M', clss = 0, NPS_key)
+    if (!is.null(df)) {
+      write.table(df, filename, sep = ',', col.names = !file.exists(filename), append = TRUE, fileEncoding = 'UTF-8', row.names = FALSE)
+    }
+    else {
+      return(-1)
+    }
+    
+    # 여자
+    df = get_NPS_age_sex_clss(bjd_code, age_begin, age_end, sex = 'F', clss = 0, NPS_key)
+    if (!is.null(df)) {
+      write.table(df, filename, sep = ',', col.names = !file.exists(filename), append = TRUE, fileEncoding = 'UTF-8', row.names = FALSE)
+    }
+    else {
+      return(-1)
+    }
+  }
+}
+
+# tmpdf = data.frame(EMD_CD = c('1111010100'))
+# tmpdf
+# download_NPS(tmpdf)
+# 
+# df = read.csv('dong_age_sex_clss_number.csv')
+# df
+```
+
+한번 에러가 있으면, retry 하도록 함수도 수정했습니다. 다시 받아 보겠습니다.
+
+```{r download_r1}
+system.time(download_NPS(r1))
+```
+
+r1 데이터프레임을 받다가, 하루 사용량 10000번을 초과 하니, 아래와 같이 에러를 받았습니다.
+**2019-09-12 09:31:20 DEBUG::116 1114012900** 로그상으로는 116번째 동을 다운 받다가 발생했네요. 내일 다시 시도해야겠습니다.
+```
+2019-09-12 09:31:21 DEBUG::dump res : <OpenAPI_ServiceResponse>
+	<cmmMsgHeader>
+		<errMsg>SERVICE ERROR</errMsg>
+		<returnAuthMsg>LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR</returnAuthMsg>
+		<returnReasonCode>22</returnReasonCode>
+	</cmmMsgHeader>
+</OpenAPI_ServiceResponse>
+```
+
+이런 에러가 나기도 합니다. HTTP_ERROR
+```
+	<cmmMsgHeader>
+		<errMsg>SERVICE ERROR</errMsg>
+		<returnAuthMsg>HTTP_ERROR</returnAuthMsg>
+		<returnReasonCode>04</returnReasonCode>
+	</cmmMsgHeader>
+```
+
+## 다시 받자
+
+dong_age_sex_clss_number.csv 파일을 잘 간수 해야합니다. 다시 만들려면 3일 걸립니다.
+
+```{r download_r1}
+system.time(download_NPS(r1))
+```
+
+```{r download_r2}
+system.time(download_NPS(r2))
+```
+
+```{r download_r3}
+system.time(download_NPS(r3))
+```

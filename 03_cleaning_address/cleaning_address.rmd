@@ -1,0 +1,94 @@
+---
+title: "Gathering"
+author: "김병건"
+date: '2019 8 31 '
+output:
+  html_document:
+    df_print: paged
+---
+
+# Install packages
+``` {R Install_packages}
+installed.packages('dplyr')
+```
+
+# 법정동코드
+
+국민연금 데이터는 지역구분을 할 때, 법정동코드를 사용합니다.
+법정동코드는 우편번호와는 다른 시/군/구/동/읍/면/리 에 따른 새로운 코드입니다.
+
+아래와 같이 3개(또는 4개의) 코드가 조합되어, 하나의 동(또는 리)을/를 가리킵니다.
+
+* 시코드 + 구코드 + 동코드
+* 군코드 + 구코드 + 면코드 + 리코드
+ * 예외적으로 시/군코드 + (구코드 없고) + 동/면코드 가 있는 경우도 있음
+
+법정동 코드 데이터 다운 받은 URL
+https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardList.do;jsessionid=L4NZrrq2LTDtaTyIC4YbQOae.node40?bbsId=BBSMSTR_000000000052
+
+현재 최신 법정동코드인 2019년 7월 1일 법정동코드를 사용합니다.
+https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=71566
+
+파일이름
+jscode20190701.zip
+KIKcd_B.20190701.xlsx
+ - KiKcd_B.20190701 → 법정동코드(실제주소) 
+ 
+## Data cleaning steps
+* '생성일자' 컬럼 삭제
+ * KiKcd_B.20190701.xlsx → 법정동코드(실제주소) 파일은 실제 사용되는 법정동 코드만 가지고 있으므로, '생성일자' 컬럼이 필요 없음 / 엑셀에서 삭제함
+* '말소일자' 컬럼 삭제
+ * KiKcd_B.20190701.xlsx → 법정동코드(실제주소) 파일은 실제 사용되는 법정동 코드만 가지고 있으므로, '말소일자' 컬럼이 필요 없음 / 엑셀에서 삭제함
+* CSV파일의 BOM을 삭제 해야함
+ * 엑셀에서 CSV로 저장하면, BOM이 있는 UTF-8 CSV파일로 저장됨
+ * notepad++을 사용해서 BOM을 삭제해야 read.csv()로 읽을 수 있음
+ * BJD_no_BOM.csv로 저장함함
+
+```{r cleaning_step_1}
+jeonkuk_dongcode_dongname_df <- read.csv('../../SeoulBigDataCampus_Competition2019_Submission_data/address/BJD_no_BOM.csv', header = TRUE, fileEncoding = 'UTF-8', encoding = 'CP949', sep = ',', dec = '.', fill = TRUE, , quote = "")
+head(jeonkuk_dongcode_dongname_df)
+```
+* 컬럼이름이 한글이면, R코드에서 사용이 어렵기 때문에, 영문 컬럼이름으로 변경함
+ * 법정동코드 bjd_code
+ * 시도명 si_do
+ * 시군구명 gun_gu
+ * 읍면동명 myun_dong
+ * 동리명 dong_li
+
+* 동(또는 리)을/를 기준으로 kormap에 표시할 예정, 동 또는 리로 끝나지 않는 주소는 모두 filter
+ * 서울특별시 or 서울특별시 종로구 로 끝나는 컬럼을 필요없으므로, filter함
+
+* 시도 부터 동까지 합처서 주소를 만들겠습니다.
+
+```{r }
+library(dplyr)
+
+#컬럼이름 확인
+colnames(jeonkuk_dongcode_dongname_df)
+
+#컬럼이름 변경
+colnames(jeonkuk_dongcode_dongname_df) <- c('bjd_code', 'si_do', 'gun_gu', 'myun_dong', 'dong_li')
+
+#컬럼이름 올바르게 변경되었는지 확인함함
+colnames(jeonkuk_dongcode_dongname_df)
+
+head(jeonkuk_dongcode_dongname_df)
+
+#TODO
+# filter는 순서대로 filter함으로, gun_gu는 없고, myun_dong만 있는 케이스는 filter 됨으로
+# map이나 다른 함수를 사용해서, filter코드를 업데이트 해야함함
+jeonkuk_dongcode_dongname_df <- jeonkuk_dongcode_dongname_df %>% filter(gun_gu != '', myun_dong != '')
+
+# 컬럼 타입 charater로 변경
+jeonkuk_dongcode_dongname_df$bjd_code = as.character(jeonkuk_dongcode_dongname_df$bjd_code)
+jeonkuk_dongcode_dongname_df$si_do = as.character(jeonkuk_dongcode_dongname_df$si_do)
+jeonkuk_dongcode_dongname_df$gun_gu = as.character(jeonkuk_dongcode_dongname_df$gun_gu)
+jeonkuk_dongcode_dongname_df$myun_dong = as.character(jeonkuk_dongcode_dongname_df$myun_dong)
+
+jeonkuk_dongcode_dongname_df$address = paste(jeonkuk_dongcode_dongname_df$si_do,
+                                             jeonkuk_dongcode_dongname_df$gun_gu,
+                                             jeonkuk_dongcode_dongname_df$myun_dong)
+
+head(jeonkuk_dongcode_dongname_df)
+write.csv(jeonkuk_dongcode_dongname_df, 'jeonkuk_dongcode_dongname.csv', fileEncoding = 'UTF-8', row.names = FALSE, col.names = TRUE)
+```

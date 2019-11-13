@@ -1,0 +1,167 @@
+---
+title: "Untitled"
+author: "author"
+date: '2019 10 14 '
+output: html_document
+---
+
+```{r library}
+library(dplyr)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 행정동과 법정동을 변환준비
+
+- 지도 파일은 법정동코드 기준으로 작성
+- 서울시 빅데이터캠프에서 제공하는 생활인구 데이터는, 행정동코드 기준으로 만들어저 있음
+
+법정동 코드 데이터 다운 받은 URL
+https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardList.do;jsessionid=L4NZrrq2LTDtaTyIC4YbQOae.node40?bbsId=BBSMSTR_000000000052
+
+현재 최신 법정동코드인 2019년 7월 1일 법정동코드를 사용합니다.
+https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=71566
+
+- jscode20190701.zip 파일에서
+- KIKcd_B.20190701.xlsx 파일을 엑셀로 csv 파일 hjd_2_bjd.csv로 변환함
+- 컬럼이름도 영문으로 변경함
+
+```{r cars}
+df = read.csv('../../SeoulBigDataCampus_Competition2019_Submission_data/BeobJeongDong_HaengJeongDong/hjd_2_bjd.csv', fileEncoding = 'UTF-8-BOM')
+df$hjd_code = as.character(df$hjd_code)
+df$si_do = as.character(df$si_do)
+df$gun_gu = as.character(df$gun_gu)
+df$hjd_dong = as.character(df$hjd_dong)
+
+df$bjd_code = as.character(df$bjd_code)
+df$bjd_dong = as.character(df$bjd_dong)
+head(df)
+
+# 서울에 속해있는 동만 필터링함
+df %>% 
+  filter(substr(bjd_code, 1, 2) == '11') ->
+  df2
+
+head(df2)
+
+# 시, 군구 를 가리키는 row 지움
+df2 %>% 
+  filter(length(gun_gu) > 1) %>% 
+  filter(length(hjd_dong) > 1) ->
+  df3
+
+head(df3)
+
+write.csv(df3, 'seoul_hjd_2_bjd.csv', fileEncoding = 'UTF-8', row.names = FALSE)
+```
+
+# 행정동과 법정동의 관계는?
+- 1:N 인가?
+ - 데이터로 보면 hdj가 여러개의 bjd에 맵핑되는 것으로 보임
+- N:1 인가?
+ - N:1인 관계가 있는지 확인이 필요함
+
+```{r}
+df = read.csv('seoul_hjd_2_bjd.csv', fileEncoding = 'UTF-8')
+df$hjd_code = as.character(df$hjd_code)
+df$si_do = as.character(df$si_do)
+df$gun_gu = as.character(df$gun_gu)
+df$hjd_dong = as.character(df$hjd_dong)
+
+df$bjd_code = as.character(df$bjd_code)
+df$bjd_dong = as.character(df$bjd_dong)
+
+head(df)
+```
+
+```{r}
+# 행정동:법정동 이 N:1인 경우가 있는지 확인 필요함
+N = nrow(df)
+
+for (n in seq(1, N, 1)) {
+  one_bjd_code = df$bjd_code[[n]]
+  
+  df %>% 
+    filter(bjd_code == one_bjd_code) ->
+    tmp_df
+  
+  if(nrow(tmp_df) > 2) {
+    print(one_bjd_code)
+    print(tmp_df)
+    break
+  }
+}
+
+# 행정동과 법정동은 N:N 관계임
+```
+
+```{r}
+df %>% 
+  select(hjd_code, bjd_code) ->
+  hjd2bjd_df
+
+head(hjd2bjd_df)
+
+write.csv(hjd2bjd_df, 'seoul_hjd2bjd.csv', fileEncoding = 'UTF-8', row.names = FALSE)
+```
+
+
+# 행정동과 법정동은 N:N 관계임
+
+- 행정동:법정동 1:N
+ - 행정동의 데이터를 N으로 나눠서 각 법정동에 저장
+- 행정동:법정동 N:1
+ - 행정동의 데이터를 합처서 법정동에 저장
+
+
+## 행정동과 법정동은 1:N 관계 해결 방법
+- 법정동 N인 만큼 나눠서 assign 함
+
+```{r}
+df = read.csv('seoul_hjd2bjd.csv', fileEncoding = 'UTF-8')
+
+df$hjd_code = as.character(df$hjd_code)
+df$bjd_code = as.character(df$bjd_code)
+
+df = df[with(df, order(hjd_code)), ]
+head(df)
+
+df$dup_hjd_count = 1
+
+N = nrow(df)
+# N = 10
+
+for (n in seq(1, N, 1)) {
+  if (n > 1) {
+    if (df$hjd_code[[n-1]] == df$hjd_code[[n]])
+      df$dup_hjd_count[[n]] = df$dup_hjd_count[[n-1]] + 1
+  }
+}
+
+head(df)
+# df
+
+df$hjd2bjd_rate = 1 / df$dup_hjd_count
+df
+
+df %>%
+  group_by(hjd_code) %>%
+  summarise(rate = min(hjd2bjd_rate), count = max(dup_hjd_count)) ->
+  df2
+
+df2 = data.frame(df2)
+df2
+
+df3 = merge(df, df2, by.x = 'hjd_code', by.y = 'hjd_code')
+df3 %>%
+  select(hjd_code, count, rate, bjd_code) ->
+  df4
+df4
+
+write.csv(df4, 'cleaned_seoul_hjd2bjd.csv', fileEncoding = 'UTF-8', row.names = FALSE)
+```
+
+## 행정동과 법정동은 N:1 관계 해결 방법
+- bjd_code를 사용해서group_by 로 합치면 됨
