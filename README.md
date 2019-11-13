@@ -17,7 +17,7 @@
 - 각 클러스터별로, 퇴근 후 이동해 자원봉사에 참여할 수 있는 사람을, 직장인구수, 거주 인구수, 성별, 연령별 분석
 - 클러스터별로 분석결과 비교및 보다 좋은 클러스터 추천
 
-# 분석 데이터 및 도구
+# 데이터셋 및 도구
 
 R과 Excel을 사용해서 분석했습니다.
 
@@ -28,6 +28,14 @@ R과 Excel을 사용해서 분석했습니다.
 |구글 Distance Matrix API|Google LLC|https://developers.google.com/maps/documentation/distance-matrix/intro|
 |서울시 지도|행정안전부 산하 한국지역정보개발원|http://www.juso.go.kr|
 |지하철 환승역 위치|행정안전부 산하 한국지역정보개발원|http://www.juso.go.kr|
+
+# 참고자료
+- ‘국민연금 가입현황’ OpenAPI 사용하기
+ - https://github.com/skysign/example_korea_NPS_openapi
+- R에서 한국지도 그려보기 (Drawing South Korea map in R)
+ - https://github.com/skysign/drawing_south_korea_map_in_R
+- R에서 구글 Distan Matrix API는 다른 OpenAPI를 사용기
+ - https://github.com/skysign/example_google_distance_matrix_api_in_R
 
 # 저작권 & License
 - 분석에 사용된 OpenAPI 및 모든 데이터는, 제공해주시는 기관및 단체의, 라이센스및 저작권을 따릅니다.
